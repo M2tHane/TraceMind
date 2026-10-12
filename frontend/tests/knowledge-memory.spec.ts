@@ -86,7 +86,7 @@ for (const width of [375, 1440]) {
     await expect(problems.getByRole('button', { name: /^重新处理/ })).toHaveCount(1)
     await expectNoPageOverflow(page)
     await problems.getByRole('button', { name: '重新处理 license.pdf' }).click()
-    await page.getByRole('link', { name: /处理失败的文档/ }).click()
+    await page.getByRole('group', { name: '文档状态' }).getByRole('button', { name: /^失败/ }).click()
     await expect(page).toHaveURL(/docs=failed/)
     await expect(problems.getByRole('link', { name: 'deploy.pdf' })).toHaveCount(0)
     await page.getByRole('group', { name: '范围' }).getByRole('button', { name: /^个人/ }).click()
@@ -141,6 +141,20 @@ test('document detail selects the chunk from the link and follows the chunk list
   await page.getByRole('link', { name: '产品手册' }).first().click()
   await expect(page).toHaveURL(/\/knowledge\/kb-1$/)
   expect(errors).toEqual([])
+})
+
+test('a document opened from an answer offers the way back to the conversation', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await mockApi(page)
+  await page.goto('/knowledge/kb-1/documents/d1?chunk=c23')
+  await expect(page.getByRole('heading', { name: 'guide.md', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '返回会话' })).toHaveCount(0)
+  // Only same-app chat paths are honoured.
+  await page.goto('/knowledge/kb-1/documents/d1?chunk=c23&from=https%3A%2F%2Fevil.example')
+  await expect(page.getByRole('heading', { name: 'guide.md', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '返回会话' })).toHaveCount(0)
+  await page.goto('/knowledge/kb-1/documents/d1?chunk=c23&from=%2Fchat%2Fchat-9')
+  await expect(page.getByRole('link', { name: '返回会话' })).toHaveAttribute('href', '/chat/chat-9')
 })
 
 for (const width of [375, 1440]) {

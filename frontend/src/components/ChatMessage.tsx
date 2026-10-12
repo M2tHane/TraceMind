@@ -67,13 +67,13 @@ export function ChatMessage({ message, initial = '我', evidence }: { message: M
       {pending ? <Pending message={message} />
         : message.status === 'failed' ? <ErrorState error={new Error(message.error || '生成失败，请检查服务配置后重新提问。')} />
           : message.content && <div className="assistant-bubble">
+            {unplaced.length > 0 && <p className="answer-cites">{unplaced.map(({ citation, index }) =>
+              <CiteMarker key={`${citation.document_id}:${citation.id}`} n={index + 1} active={!!evidence?.active && evidence.citation === index}
+                label={citeLabel(index)} onClick={evidence ? () => evidence.onCite(index) : undefined} />)}</p>}
             <Markdown text={message.content} cite={{
               active: evidence?.active ? evidence.citation + 1 : undefined, label: n => citeLabel(n - 1),
               onCite: evidence ? n => { if (citations[n - 1]) evidence.onCite(n - 1) } : undefined,
             }} />
-            {unplaced.length > 0 && <p className="answer-cites">{unplaced.map(({ citation, index }) =>
-              <CiteMarker key={`${citation.document_id}:${citation.id}`} n={index + 1} active={!!evidence?.active && evidence.citation === index}
-                label={citeLabel(index)} onClick={evidence ? () => evidence.onCite(index) : undefined} />)}</p>}
           </div>}
       {message.status === 'completed' && <div className="message-support">
         <MessageTime value={message.created_at} />

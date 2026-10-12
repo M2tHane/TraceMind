@@ -22,6 +22,8 @@ const common = { conversation_id: 'chat-1', status: 'completed', stage: 'complet
 const messages = [
   { ...common, id: 'm1', role: 'user', content: '年假和病假怎么请？' },
   { ...common, id: 'm2', role: 'assistant', content: '年假按入职年限计算[^1]；病假需提交医院证明[^2]。', citations: [first, second], contexts: [first, second, uncited], retrieval_trace: trace, model_snapshot: profile, timing: { retrieval_ms: 133, generation_ms: 900 } },
+  { ...common, id: 'm3', role: 'user', content: '加班以后怎么调休？这是一个很长很长的问题，用来检查下拉框里超出宽度的部分会被省略号截断' },
+  { ...common, id: 'm4', role: 'assistant', content: '加班调休需在三个月内使用。', citations: [uncited], contexts: [uncited], retrieval_trace: trace, model_snapshot: profile },
 ]
 
 async function mockChat(page: Page, rows: unknown[] = messages, hits: { messages: number } = { messages: 0 }) {
@@ -129,9 +131,9 @@ test('answer citation markers select the matching evidence card and back', async
   await expect(pane.getByRole('region', { name: '召回但未引用' })).toContainText('加班调休')
 
   // Markers sit after the sentence they support, not in a row at the end of the answer.
-  await expect(page.locator('.assistant-bubble .markdown .tm-cite')).toHaveCount(2)
-  await expect(page.locator('.answer-cites')).toHaveCount(0)
-  await expect(page.locator('.assistant-bubble')).not.toContainText('[^')
+  await expect(page.locator('.assistant-bubble').first().locator('.markdown .tm-cite')).toHaveCount(2)
+  await expect(page.locator('.assistant-bubble').first().locator('.answer-cites')).toHaveCount(0)
+  await expect(page.locator('.assistant-bubble').first()).not.toContainText('[^')
   const marker2 = page.getByRole('button', { name: '引用 2：handbook.docx 第 7 页' })
   await marker2.click()
   await expect(page.locator('.answer-claim[data-active]')).toHaveText('病假需提交医院证明')
@@ -139,7 +141,7 @@ test('answer citation markers select the matching evidence card and back', async
   await expect(cards.nth(1)).toHaveAttribute('aria-current', 'true')
   await expect(cards.nth(0)).not.toHaveAttribute('aria-current', 'true')
   await expect(cards.nth(1)).toContainText('病假需提交医院证明')
-  await expect(cards.nth(1).getByRole('link', { name: '打开原文第 7 页' })).toHaveAttribute('href', '/knowledge/kb-1/documents/doc-2?page=7&chunk=chunk-2')
+  await expect(cards.nth(1).getByRole('link', { name: '打开原文第 7 页' })).toHaveAttribute('href', '/knowledge/kb-1/documents/doc-2?page=7&chunk=chunk-2&from=%2Fchat%2Fchat-1')
 
   await pane.getByRole('button', { name: '选中引用 1' }).click()
   await expect(cards.nth(0)).toHaveAttribute('aria-current', 'true')
@@ -161,7 +163,7 @@ test('copying an answer drops the inline citation markers', async ({ page }) => 
   })
   const unexpected = await mockChat(page)
   await page.goto('/chat/chat-1')
-  await page.getByRole('button', { name: '复制回答', exact: true }).click()
+  await page.locator('.message-assistant').first().getByRole('button', { name: '复制回答', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-copied-text', '年假按入职年限计算；病假需提交医院证明。')
   expect(unexpected).toEqual([])
 })
@@ -182,4 +184,54 @@ test('messages are polled only while an answer is still being generated', async 
   await page.reload()
   await expect(page.locator('.pending-answer')).toBeVisible()
   await expect.poll(() => running.messages, { timeout: 7000 }).toBeGreaterThanOrEqual(3)
+})
+
+test('the pane explains the first question by default and switches through the question picker', async ({ page }) => {
+  const unexpected = await mockChat(page)
+  await page.goto('/chat/chat-1')
+  const pane = page.getByRole('complementary', { name: '回答依据' })
+  const picker = pane.getByRole('button', { name: /^选择问题/ })
+  await expect(picker).toContainText('问题 1')
+  await expect(picker).toContainText('年假和病假怎么请？')
+  await expect(pane.locator('.evidence-card')).toHaveCount(2)
+
+  await picker.click()
+  const list = page.getByRole('listbox', { name: '选择问题' })
+  await expect(list.getByRole('option')).toHaveCount(2)
+  await expect(list.getByRole('option', { selected: true })).toContainText('问题 1')
+  // The list is as wide as the pane and long questions are cut with an ellipsis.
+  const paneBox = (await pane.boundingBox())!
+  const listBox = (await page.locator('.evidence-question-pop').boundingBox())!
+  expect(Math.abs(listBox.width - paneBox.width)).toBeLessThanOrEqual(2)
+  const long = list.getByRole('option').nth(1).locator('.evidence-question-text')
+  expect(await long.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(list).toHaveCount(0)
+  await expect(picker).toContainText('问题 2')
+  await expect(pane.locator('.evidence-card')).toHaveCount(1)
+  await expect(pane.locator('.evidence-card')).toContainText('handbook.docx')
+  // No scrollbar inside the pane header.
+  expect(await pane.locator('.evidence-tabs').evaluate(element => ['visible', 'hidden', 'clip'].includes(getComputedStyle(element).overflowY))).toBe(true)
+  expect(unexpected).toEqual([])
+})
+
+test('a citation marker reopens a collapsed pane on that answer and citation', async ({ page }) => {
+  const unexpected = await mockChat(page)
+  await page.goto('/chat/chat-1')
+  await page.getByRole('button', { name: '收起右侧面板' }).click()
+  await expect(page.getByRole('complementary', { name: '右侧面板已收起' })).toBeVisible()
+  // The second answer has no inline marker, so its citation sits at the answer's top-right.
+  const bubble = page.locator('.assistant-bubble').nth(1)
+  const corner = bubble.locator('.answer-cites')
+  const bubbleBox = (await bubble.boundingBox())!
+  const cornerBox = (await corner.boundingBox())!
+  expect(cornerBox.y - bubbleBox.y).toBeLessThan(24)
+  expect(bubbleBox.x + bubbleBox.width - (cornerBox.x + cornerBox.width)).toBeLessThan(24)
+  await corner.getByRole('button', { name: /^引用 1：handbook.docx/ }).click()
+  const pane = page.getByRole('complementary', { name: '回答依据' })
+  await expect(pane).toBeVisible()
+  await expect(pane.getByRole('button', { name: /^选择问题/ })).toContainText('问题 2')
+  await expect(pane.locator('.evidence-card').first()).toHaveAttribute('aria-current', 'true')
+  expect(unexpected).toEqual([])
 })

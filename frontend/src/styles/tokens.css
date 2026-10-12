@@ -4,8 +4,9 @@
   --tm-surface: #FFFFFF;
   --tm-surface-2: #FAFBF9;
   --tm-surface-3: #F6F7F5;
-  --tm-rail: #E3E7E1;
-  --tm-rail-line: #D2D7CF;
+  /* One surface for all chrome around the content: rail, module sidebars, chat list, evidence pane. */
+  --tm-rail: #F6F7F4;
+  --tm-rail-line: #D7DBD5;
   --tm-hover: #EDF0EB;
   --tm-ink: #18201D;
   --tm-ink-hover: #2D3632;

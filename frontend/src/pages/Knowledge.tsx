@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, formatNumber, post, put, remove, useAction, useApi } from '../lib/api'
 import { DEFAULT_RETRIEVAL } from '../lib/types'
@@ -125,7 +125,7 @@ export function KnowledgePage() {
       ? <Button variant="secondary" size="sm" busy={retry.isPending && retry.variables?.id === doc.id} disabled={retry.isPending} onClick={() => retry.mutate(doc)} aria-label={`重新处理 ${doc.filename}`}>重新处理</Button> : null },
   ]
 
-  return <Page side={<KnowledgeSide filter={scope} failedView={docView === 'failed'} />} title="知识库" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建知识库</Button>}>
+  return <Page side={<KnowledgeSide filter={scope} />} title="知识库" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建知识库</Button>}>
     <div className="kb-filters">
       <label className="tm-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索知识库" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} placeholder="按名称或描述搜索" /></label>
       <Segmented label="范围" value={scope} onChange={value => setParam('scope', value === 'all' ? null : value)} items={[{ value: 'all', label: '全部' }, { value: 'platform', label: '平台', count: scopeCount('platform') }, { value: 'personal', label: '个人', count: scopeCount('personal') }]} />
@@ -432,7 +432,11 @@ export function DocumentDetail() {
     <StatusTag value={data.status} />
     <span className="tm-muted tm-num">{[data.page_count && isPdf ? `${data.page_count} 页` : null, `${formatNumber(data.chunk_count)} 个分块`, sourceLabel(data.source_type), `${uploader ? `${uploader} ` : ''}${formatWhen(data.created_at)} 上传`].filter(Boolean).join('，')}</span>
   </>
+  // Opened from an answer's evidence: offer the way back to that conversation (same-app chat paths only).
+  const from = params.get('from')
+  const backToChat = from && /^\/chat\/[\w-]+$/.test(from) ? from : null
   const actions = data && <>
+    {backToChat && <Link className={buttonClass('secondary')} to={backToChat}><ArrowLeft size={14} aria-hidden="true" />返回会话</Link>}
     {manage && data.status === 'ready' && <Button variant="secondary" busy={replace.isPending} onClick={() => replaceInput.current?.click()}>上传新版本</Button>}
     <a className={buttonClass('secondary')} href={`/api/documents/${encodeURIComponent(documentId)}/file`} download={data.filename}>下载原文件</a>
     {removable(data) && <Button variant="danger" busy={destroy.isPending} onClick={() => confirmDelete(data, destroy.mutate)}>{data.review_status === 'pending' ? '撤回' : '删除'}</Button>}

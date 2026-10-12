@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { useApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
-import { isFailed, useLibraryDocuments } from '../../lib/knowledge'
 import type { Dataset, KnowledgeBase, Run, TuningRun, UserAccount } from '../../lib/types'
 import type { ModelProfile } from '../../lib/configuration'
 import { statusLabel, statusTone } from '../ui'
@@ -23,23 +22,16 @@ function recentKnowledgeBases(): string[] {
 
 export type KnowledgeFilter = 'all' | 'platform' | 'personal'
 
-export function KnowledgeSide({ filter, failedView = false }: { filter: KnowledgeFilter; failedView?: boolean }) {
-  const admin = useAuth().user?.role === 'admin'
+export function KnowledgeSide({ filter }: { filter: KnowledgeFilter }) {
   const kbs = useApi<KnowledgeBase[]>('/knowledge-bases')
-  const pending = useReviewCount(admin)
-  const failed = useLibraryDocuments(kbs.data).docs.filter(isFailed).length
   const list = kbs.data ?? []
   const count = (scope?: string) => kbs.data ? list.filter(kb => !scope || kb.scope === scope).length : undefined
   const recent = recentKnowledgeBases().map(id => list.find(kb => kb.id === id)).filter((kb): kb is KnowledgeBase => !!kb)
   return <SideNav title="知识库" label="知识库导航" groups={[
     { items: [
-      { to: '/knowledge', label: '全部', count: count(), current: !failedView && filter === 'all' },
-      { to: '/knowledge?scope=platform', label: '平台知识库', count: count('platform'), current: !failedView && filter === 'platform' },
-      { to: '/knowledge?scope=personal', label: '我的知识库', count: count('personal'), current: !failedView && filter === 'personal' },
-    ] },
-    { label: '需要处理', items: [
-      ...(admin ? [{ to: '/admin/reviews', label: '待我审批的上传', count: pending || undefined }] : []),
-      { to: '/knowledge?docs=failed', label: '处理失败的文档', count: failed ? <span style={{ color: 'var(--tm-danger)' }}>{failed}</span> : undefined, current: failedView },
+      { to: '/knowledge', label: '全部', count: count(), current: filter === 'all' },
+      { to: '/knowledge?scope=platform', label: '平台知识库', count: count('platform'), current: filter === 'platform' },
+      { to: '/knowledge?scope=personal', label: '我的知识库', count: count('personal'), current: filter === 'personal' },
     ] },
     { label: '最近打开', items: recent.map(kb => ({ to: `/knowledge/${kb.id}`, label: kb.name, title: kb.name })) },
   ]} />

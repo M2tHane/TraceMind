@@ -9,6 +9,7 @@ import { DEFAULT_RETRIEVAL, METHODS, methodLabel, type Conversation, type Docume
 import type { ModelProfile } from '../lib/configuration'
 import { configForMethod } from '../lib/trace'
 import { useAuth } from '../lib/auth'
+import { useStoredState } from '../lib/storage'
 import { Button, buttonClass, Empty, ErrorState, Field, Loading, Notice, ScopeTag, SearchableSelect } from '../components/ui'
 import { ChatMessage } from '../components/ChatMessage'
 import { ChatSidebar } from '../components/ChatSidebar'
@@ -63,6 +64,7 @@ export function ChatPage() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [tab, setTab] = useState<EvidenceTab>('cites')
   const [citation, setCitation] = useState(0)
+  const [paneOpen, setPaneOpen] = useStoredState('tm.chat.pane-open', true)
   const bottom = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const pending = messages.data?.some(message => ['queued', 'processing'].includes(message.status)) ?? false
@@ -83,14 +85,14 @@ export function ChatPage() {
     if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
   }, [last?.id, last?.status, id])
 
-  // The pane follows the newest completed answer until the user picks another one.
-  const answers = useMemo(() => (messages.data ?? []).filter(message => message.role === 'assistant'), [messages.data])
-  const shown = (id && answers.find(message => message.id === activeId)) || [...answers].reverse().find(message => message.status === 'completed')
-  const answerNumber = shown ? answers.indexOf(shown) + 1 : 0
-  const shownIndex = shown ? messages.data!.indexOf(shown) : -1
-  const question = shownIndex > 0 && messages.data![shownIndex - 1].role === 'user' ? messages.data![shownIndex - 1].content : undefined
+  // Answered questions the pane can explain; it shows the first until the user picks another.
+  const answered = useMemo(() => (messages.data ?? []).flatMap((message, index, all) => message.role === 'assistant' && message.status === 'completed'
+    ? [{ message, question: all[index - 1]?.role === 'user' ? all[index - 1].content : '' }] : []), [messages.data])
+  const shownEntry = (id && answered.find(entry => entry.message.id === activeId)) || answered[0]
+  const shown = shownEntry?.message
+  const question = shownEntry?.question || undefined
   function focusPane(message: Message, nextTab: EvidenceTab, index = 0): void {
-    setActiveId(message.id); setTab(nextTab); setCitation(index)
+    setActiveId(message.id); setTab(nextTab); setCitation(index); setPaneOpen(true)
     if (window.matchMedia('(max-width: 1099px)').matches) requestAnimationFrame(() => document.getElementById('evidence-pane')?.scrollIntoView({ block: 'start' }))
   }
 
@@ -158,7 +160,9 @@ export function ChatPage() {
         </form>
       </div>
     </main>
-    <EvidencePane message={shown} answerNumber={answerNumber} question={question} tab={tab} onTab={setTab} citation={citation} onCitation={setCitation} kbId={kbId || undefined} canCompare={admin} />
+    <EvidencePane message={shown} question={question} tab={tab} onTab={setTab} citation={citation} onCitation={setCitation} kbId={kbId || undefined} canCompare={admin}
+      open={paneOpen} onOpenChange={setPaneOpen} answers={answered.map(entry => ({ id: entry.message.id, question: entry.question || '（无问题文本）' }))}
+      onAnswer={answerId => { setActiveId(answerId); setCitation(0) }} backTo={id ? `/chat/${id}` : undefined} />
   </>
 }
 

@@ -77,7 +77,8 @@ textarea.tm-input { height: auto; padding: 8px 10px; line-height: 1.55; resize: 
 .tm-seg-block button { flex: 1; justify-content: center; padding: 0 6px; font-size: 12px; }
 
 /* Tabs (underline) */
-.tm-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--tm-line); overflow-x: auto; }
+.tm-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--tm-line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tm-tabs::-webkit-scrollbar { display: none; }
 .tm-tab {
   height: 40px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
   background: none; color: var(--tm-muted); cursor: pointer; padding: 0; white-space: nowrap; text-decoration: none;
@@ -96,8 +97,6 @@ a.tm-tab { color: var(--tm-muted); }
 .tm-panel-header { height: var(--tm-bar-h); flex: 0 0 auto; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--tm-line); padding: 0 12px; min-width: 0; }
 .tm-panel-header h2 { margin: 0; font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-panel-toggle { width: 32px; height: 32px; padding: 0; flex: 0 0 auto; }
-.tm-panel-toggle[aria-expanded="false"] { background: var(--tm-ink); border-color: var(--tm-ink); color: #fff; }
-.tm-panel-toggle[aria-expanded="false"]:hover { background: var(--tm-ink-hover); }
 .tm-panel-collapsed { flex: 0 0 52px; width: 52px; display: flex; flex-direction: column; }
 .tm-panel-collapsed .tm-panel-header { justify-content: center; padding: 0; }
 
