@@ -51,7 +51,8 @@ export function ChatPage() {
   const active = conversations.data?.find(conversation => conversation.id === id)
   const kbId = id ? active?.knowledge_base_id ?? '' : params.get('kb') ?? kbs.data?.[0]?.id ?? ''
   const kb = kbs.data?.find(item => item.id === kbId)
-  const messages = useApi<Message[]>(`/conversations/${id}/messages`, { enabled: !!id, poll: 2000 })
+  // Poll only while an answer is queued or being generated.
+  const messages = useApi<Message[]>(`/conversations/${id}/messages`, { enabled: !!id, poll: data => data?.some(message => ['queued', 'processing'].includes(message.status)) ? 2000 : false })
   const [text, setText] = useState('')
   const [method, setMethod] = useState<Method>('hybrid_rerank')
   const [topK, setTopK] = useState(5)

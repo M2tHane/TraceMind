@@ -27,8 +27,11 @@ export const remove = <T>(path: string): Promise<T> => api<T>(path, { method: 'D
 export const patch = <T>(path: string, body: unknown): Promise<T> => api<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
 export const put = <T>(path: string, body: unknown): Promise<T> => api<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 export const post = <T>(path: string, body?: unknown): Promise<T> => api<T>(path, { method: 'POST', ...(body === undefined ? {} : { body: body instanceof FormData ? body : JSON.stringify(body) }) })
-export function useApi<T>(path: string, options: { enabled?: boolean; poll?: number | false } = {}) {
-  return useQuery<T, Error>({ queryKey: [path], queryFn: ({ signal }) => api<T>(path, { signal }), enabled: options.enabled ?? true, refetchInterval: options.poll ?? false })
+/** `poll` may depend on the latest data, e.g. only while something is still running. */
+export function useApi<T>(path: string, options: { enabled?: boolean; poll?: number | false | ((data: T | undefined) => number | false) } = {}) {
+  const poll = options.poll ?? false
+  return useQuery<T, Error>({ queryKey: [path], queryFn: ({ signal }) => api<T>(path, { signal }), enabled: options.enabled ?? true,
+    refetchInterval: typeof poll === 'function' ? query => poll(query.state.data) : poll })
 }
 export function useAction<T, V>(action: (variables: V) => Promise<T>, options: { invalidate?: string[]; success?: string; onSuccess?: (result: T, variables: V) => void } = {}) {
   const client = useQueryClient()

@@ -24,7 +24,7 @@ const messages = [
   { ...common, id: 'm2', role: 'assistant', content: '年假按入职年限计算[^1]；病假需提交医院证明[^2]。', citations: [first, second], contexts: [first, second, uncited], retrieval_trace: trace, model_snapshot: profile, timing: { retrieval_ms: 133, generation_ms: 900 } },
 ]
 
-async function mockChat(page: Page) {
+async function mockChat(page: Page, rows: unknown[] = messages, hits: { messages: number } = { messages: 0 }) {
   const unexpected: string[] = []
   await page.route('**/api/**', async route => {
     const request = route.request()
@@ -35,7 +35,7 @@ async function mockChat(page: Page) {
     if (path === '/api/model-profiles') return route.fulfill({ json: [profile] })
     if (path === '/api/knowledge-bases') return route.fulfill({ json: [{ id: 'kb-1', name: '人事制度', ready_count: 2, document_count: 2, chunk_count: 3 }] })
     if (path === '/api/conversations') return route.fulfill({ json: [{ id: 'chat-1', knowledge_base_id: 'kb-1', title: '年假和病假', created_at: createdAt }] })
-    if (path === '/api/conversations/chat-1/messages') return route.fulfill({ json: messages })
+    if (path === '/api/conversations/chat-1/messages') { hits.messages += 1; return route.fulfill({ json: rows }) }
     unexpected.push(path)
     return route.fulfill({ status: 404, json: { detail: 'Unknown fixture route' } })
   })
@@ -164,4 +164,22 @@ test('copying an answer drops the inline citation markers', async ({ page }) => 
   await page.getByRole('button', { name: '复制回答', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-copied-text', '年假按入职年限计算；病假需提交医院证明。')
   expect(unexpected).toEqual([])
+})
+
+test('messages are polled only while an answer is still being generated', async ({ page }) => {
+  const done = { messages: 0 }
+  await mockChat(page, messages, done)
+  await page.goto('/chat/chat-1')
+  await expect(page.locator('.evidence-card')).toHaveCount(2)
+  // Development StrictMode may fetch twice on mount; after that nothing may follow.
+  const loaded = done.messages
+  await page.waitForTimeout(4500)
+  expect(done.messages).toBe(loaded)
+
+  const running = { messages: 0 }
+  await page.unrouteAll()
+  await mockChat(page, [messages[0], { ...messages[1], content: '', status: 'processing', stage: 'generating', citations: [], contexts: [] }], running)
+  await page.reload()
+  await expect(page.locator('.pending-answer')).toBeVisible()
+  await expect.poll(() => running.messages, { timeout: 7000 }).toBeGreaterThanOrEqual(3)
 })
