@@ -7,7 +7,7 @@ const profile = { id: 'model-1', name: 'mock-chat', model: 'mock-model', protoco
 const first = { id: 'chunk-1', document_id: 'doc-1', filename: 'leave-policy.pdf', page: 3, score: 0.912, text: '年假按入职年限计算，满一年享有五天。' }
 const second = { id: 'chunk-2', document_id: 'doc-2', filename: 'handbook.docx', page: 7, score: 0.774, text: '病假需提交医院证明，三天以内由直属主管审批。' }
 const uncited = { id: 'chunk-3', document_id: 'doc-2', filename: 'handbook.docx', page: 9, score: 0.41, text: '加班调休需在三个月内使用。' }
-const candidates = (ids: string[]) => ids.map((id, index) => ({ rank: index + 1, id, document_id: 'doc-1', filename: 'leave-policy.pdf', page: 1, score: 1 - index / 10 }))
+const candidates = (ids: string[]) => ids.map((id, index) => ({ rank: index + 1, id, document_id: 'doc-1', filename: 'leave-policy.pdf', page: 1, score: 1 - index / 10, text: `${id} 的正文摘录` }))
 const trace = {
   config: { method: 'hybrid_rerank', top_k: 2, rerank: true }, queries: ['年假和病假怎么请？'],
   stages: [
@@ -101,6 +101,9 @@ test('evidence pane collapses, resizes, and keeps a separate width for the recal
   await expect(pane.getByRole('tab', { name: /召回链路/ })).toHaveAttribute('aria-selected', 'true')
   expect(await width(page, '.evidence-pane')).toBe(640)
   await expect(pane.locator('.trace-stage').first()).toBeVisible()
+  // Each candidate carries a short excerpt of its chunk.
+  await expect(pane.getByRole('columnheader', { name: '内容' })).toBeVisible()
+  await expect(pane.locator('.trace-excerpt').first()).toHaveText('chunk-1 的正文摘录')
   await pane.getByRole('tab', { name: /引用/ }).click()
   expect(await width(page, '.evidence-pane')).toBe(480)
 

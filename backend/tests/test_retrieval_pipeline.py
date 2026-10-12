@@ -256,3 +256,14 @@ def test_generated_answer_carries_sentence_markers() -> None:
 def test_answer_metrics_ignore_citation_markers() -> None:
     from app.services.metrics import answer_metrics
     assert answer_metrics("Paris [^1].", "Paris.")["exact_match"] == answer_metrics("Paris.", "Paris.")["exact_match"]
+
+
+def test_trace_candidates_keep_twenty_with_short_excerpts() -> None:
+    from app.services.retrieval import _compact
+    rows = [{**chunk(f"c{i}", "word  \n" * 300), "score": 1 / (i + 1)} for i in range(30)]
+    compact = _compact(rows)
+    assert len(compact) == 20 and compact[0]["rank"] == 1 and compact[-1]["id"] == "c19"
+    # Whitespace collapses and long chunks are cut to a readable excerpt.
+    assert compact[0]["text"].startswith("word word") and len(compact[0]["text"]) == 200
+    assert compact[0]["text"].endswith("…")
+    assert _compact([chunk("short", "  brief text ")])[0]["text"] == "brief text"

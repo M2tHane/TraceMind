@@ -17,7 +17,7 @@ export interface Timing { retrieval_ms?: number; generation_ms?: number }
 export interface Usage { total_tokens?: number }
 export interface RetrievalConfig { routes: ('vector' | 'bm25')[]; route_k: number; bm25_weight: number; vector_weight: number; rrf_k: number; fusion_k: number; rerank: boolean; query_rewrite: 'none' | 'multi_query'; rewrite_count: number; min_score: number | null; dedupe_threshold: number; mmr_lambda: number | null; neighbor_window: number; top_k: number; document_ids?: string[] | null }
 export const DEFAULT_RETRIEVAL: RetrievalConfig = { routes: ['vector', 'bm25'], route_k: 20, bm25_weight: 1, vector_weight: 1, rrf_k: 60, fusion_k: 20, rerank: true, query_rewrite: 'none', rewrite_count: 3, min_score: null, dedupe_threshold: 1, mmr_lambda: null, neighbor_window: 0, top_k: 5 }
-export interface TraceCandidate { rank: number; id: string; document_id: string; filename: string; page: number | null; score: number }
+export interface TraceCandidate { rank: number; id: string; document_id: string; filename: string; page: number | null; score: number; text?: string }
 export interface TraceStage { stage: string; ms: number; count?: number; candidates?: TraceCandidate[]; query?: string; queries?: string[]; [key: string]: unknown }
 export interface RetrievalTrace { config: RetrievalConfig | null; queries: string[]; stages: TraceStage[] }
 export interface RagResult { answer: string; citations: Citation[]; contexts: Citation[]; abstain: boolean; method: Method | 'custom'; timing: Timing; usage: Usage; error?: string; trace?: TraceStage[]; queries?: string[]; retrieval_config?: RetrievalConfig | null }

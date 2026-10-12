@@ -26,7 +26,8 @@ from app.services.ranking import bm25, rrf, tokenize
 
 Route = Literal["bm25", "vector"]
 LEGACY_METHODS = ("bm25", "vector", "hybrid", "hybrid_rerank")
-_TRACE_CANDIDATES = 10
+_TRACE_CANDIDATES = 20
+_TRACE_EXCERPT = 200  # characters of chunk text kept per trace candidate
 
 
 class RetrievalConfig(BaseModel):
@@ -86,9 +87,15 @@ class RetrievalCache:
     rewrites: dict[tuple[str, int], list[str]] = field(default_factory=dict)
 
 
+def _excerpt(text: Any) -> str:
+    compact = " ".join(str(text or "").split())
+    return compact if len(compact) <= _TRACE_EXCERPT else compact[:_TRACE_EXCERPT - 1] + "…"
+
+
 def _compact(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Top candidates of one stage, with a short text excerpt so a trace can be read on its own."""
     return [{"rank": rank, "id": row["id"], "document_id": row.get("document_id"), "filename": row.get("filename"),
-             "page": row.get("page"), "score": round(float(row.get("score", 0.0)), 6)}
+             "page": row.get("page"), "score": round(float(row.get("score", 0.0)), 6), "text": _excerpt(row.get("text"))}
             for rank, row in enumerate(rows[:_TRACE_CANDIDATES], 1)]
 
 

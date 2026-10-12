@@ -153,3 +153,4 @@
   .evidence-pane, .evidence-pane-collapsed { order: 2; }
   .tm-chat-list, .tm-chat-list-collapsed { order: 3; }
 }
+.trace-excerpt { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tm-text-3); }

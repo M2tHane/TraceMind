@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { SlidersHorizontal } from 'lucide-react'
-import type { RetrievalConfig, TraceStage } from '../lib/types'
+import type { RetrievalConfig, TraceCandidate, TraceStage } from '../lib/types'
 import { candidateLabel, comparisonUrl, configTags, formatMs, rankColumns, stageRows, traceTotals, type RankColumn } from '../lib/trace'
 import { buttonClass, DataTable, Segmented } from './ui'
 
 /** Rank of every chunk per column; lines break where a chunk is absent from a recorded column. */
 function RankChart({ columns, topK, selectedId }: { columns: RankColumn[]; topK?: number; selectedId?: string | null }) {
   const rows = Math.max(...columns.map(column => column.candidates.length))
-  const width = 600, left = 18, labelWidth = 150, top = 30, rowH = 26
+  const width = 600, left = 18, labelWidth = 150, top = 30
   const gap = columns.length > 1 ? (width - left - labelWidth - 8) / (columns.length - 1) : 0
   const x = (index: number) => left + index * gap
+  const rowH = rows > 10 ? 20 : 26
   const y = (rank: number) => top + (rank - 1) * rowH
   const height = top + (rows - 1) * rowH + 18
   const last = columns[columns.length - 1]
@@ -55,7 +56,8 @@ function CandidateTable({ columns, topK }: { columns: RankColumn[]; topK?: numbe
     <DataTable compact className="trace-table" rows={column.candidates} rowKey={c => c.id} rowProps={c => ({ dim: !!topK && c.rank > topK })} label={`${column.label}候选`}
       columns={[
         { key: 'rank', header: '名次', align: 'right', width: 48, cell: c => c.rank },
-        { key: 'chunk', header: '分块', cell: c => <span className="break-all">{candidateLabel(c)}</span> },
+        { key: 'chunk', header: '分块', nowrap: true, cell: c => candidateLabel(c) },
+        ...(column.candidates.some(c => c.text) ? [{ key: 'text', header: '内容', cell: (c: TraceCandidate) => <span className="trace-excerpt" title={c.text}>{c.text}</span> }] : []),
         { key: 'score', header: scoreName, align: 'right', cell: c => c.score.toFixed(3) },
         ...(previous ? [{ key: 'delta', header: `较${columns[index - 1].label}`, align: 'right' as const, nowrap: true, cell: (c: { id: string; rank: number }) => {
           const before = previous.get(c.id)
