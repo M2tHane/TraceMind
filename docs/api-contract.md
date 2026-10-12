@@ -19,7 +19,7 @@ Local-first workbench with accounts. FastAPI `/api`, raw JSON; all IDs (and `*_b
 - TraceStage: `{stage,ms,count?,candidates?:[{rank,id,document_id,filename,page,score}],...params}`. stage scope/query_rewrite/recall.vector/recall.bm25/fusion/rerank/postprocess; recall stages repeat per query.
 - RagResult: `{answer,citations: Citation[],contexts: Citation[],abstain,method,retrieval_config,queries,trace:TraceStage[],timing:{retrieval_ms,generation_ms},usage:{total_tokens},error?}`.
 - Conversation: `{id,title,knowledge_base_id,owner_id,created_at}` (private to its owner)
-- Message: `{id,conversation_id,role,content,status,stage,error,citations: Citation[],contexts: Citation[],method,timing,usage,retrieval_trace:{config,queries,stages,memories_used},created_at}`. role user/assistant; status queued/processing/completed/failed. Poll conversations while pending. Citations persist a source-text snapshot.
+- Message: `{id,conversation_id,role,content,status,stage,error,citations: Citation[],contexts: Citation[],method,timing,usage,retrieval_trace:{config,queries,stages},created_at}`. role user/assistant; status queued/processing/completed/failed. Poll conversations while pending. Citations persist a source-text snapshot.
 - Dataset: `{id,name,description,question_count,created_at}`
 - Question: `{id,dataset_id,question,reference_answer,answerable,evidence:[{document_id?:string,doc_id?:string,page:number,quote:string}],review_status}`. `doc_id` is portable filename stem for imported examples. reference_answer may be empty. review_status pending/reviewed.
 - Run: `{id,name,dataset_id,knowledge_base_id,status,methods:string[],judge_enabled,total,completed,failed,config,summary,created_at,error?}`. statuses queued/running/paused/completed/failed. config records KB/dataset snapshots.
@@ -51,7 +51,7 @@ Local-first workbench with accounts. FastAPI `/api`, raw JSON; all IDs (and `*_b
 - DELETE `/documents/{id}` removes vectors, chunks, row and files (management rights; uploaders may withdraw their own pending submissions); 409 while processing or while an evaluation freezes the library. Idempotent.
 - GET/POST `/conversations`; POST `{knowledge_base_id,title?}`.
 - GET `/conversations/{id}/messages`
-- POST `/conversations/{id}/messages` `{content,method?:hybrid_rerank,top_k?:5,candidate_k?:20,model_profile_id?:string,retrieval?:RetrievalConfig}` -> assistant Message 202. The answer is personalized with the caller's personal and the platform memories. Backend persists user+assistant, freezes selected/default model and schedules generation. Message adds `model_profile_id` and public `model_snapshot`; credentials remain server-only.
+- POST `/conversations/{id}/messages` `{content,method?:hybrid_rerank,top_k?:5,candidate_k?:20,model_profile_id?:string,retrieval?:RetrievalConfig}` -> assistant Message 202. Answers use only the retrieved sources; memories are never read. Backend persists user+assistant, freezes selected/default model and schedules generation. Message adds `model_profile_id` and public `model_snapshot`; credentials remain server-only.
 - POST `/debug` `{knowledge_base_id,question,methods:string[],retrieval_only?:false,top_k?:5,candidate_k?:20,reference_answer?:string}` -> `{results:RagResult[]}`. Synchronous, may take minutes. No fake streaming. Retrieval-only returns empty answer. Optional `retrieval:RetrievalConfig` adds a result with method `custom`.
 - GET/POST `/datasets`; POST `{name,description?}`.
 - GET/POST `/datasets/{id}/questions`; POST Question fields without id/dataset_id.

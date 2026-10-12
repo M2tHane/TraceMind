@@ -3,14 +3,16 @@
 Every call acts as a workbench account and obeys the same permissions as the web UI:
   * Streamable HTTP, mounted by app.main at http://127.0.0.1:8010/mcp. Requires a personal
     access token created on the account page: ``Authorization: Bearer rwb_...``.
-  * stdio:  cd backend && RAG_MCP_TOKEN=rwb_... .venv/bin/python -m app.mcp_server [--with-worker]
-    Without --with-worker, uploads are queued and processed by the running API.
+  * stdio:  cd backend && RAG_MCP_TOKEN=rwb_... .venv/bin/python -m app.mcp_server
+    It starts the background worker too; a Postgres advisory lock keeps a single worker active
+    when the API process is running as well (the old --with-worker flag is accepted and ignored).
 
-Libraries and memories are either ``platform`` (shared, administered) or ``personal``
-(private to the caller). Employee uploads into platform libraries and employee platform
-memories are proposals that wait for administrator approval. Every tool call is recorded
-in the administrator's MCP call log (identifiers and sizes only, never free text).
-Identifiers are decimal strings.
+Knowledge bases are either ``platform`` (shared, administered) or ``personal`` (private to
+the caller); employee uploads into platform libraries wait for administrator approval.
+Memories are always private to the calling account: other agents save what they learned about
+a user with memory_add/memory_extract and recall it with memory_search to enrich their prompts.
+Every tool call is recorded in the administrator's MCP call log (identifiers and sizes only,
+never free text). Identifiers are decimal strings.
 """
 from __future__ import annotations
 
@@ -43,10 +45,8 @@ from app.services.access import (
     check_document_removal,
     manageable_document,
     manageable_kb,
-    memory_namespace,
     readable_document,
     readable_kb,
-    require_memory_admin,
     visible_documents,
     visible_kbs,
 )
@@ -128,12 +128,14 @@ mcp = WorkbenchMCP(
     "tracemind",
     instructions=(
         "Enterprise RAG workbench acting as the token owner's account. Typical flow: kb_list → rag_search "
-        "(retrieval with a stage-by-stage trace) or rag_answer (cited answer, personalized by the caller's "
-        "memories). Libraries and memories have scope 'platform' (shared) or 'personal' (private). Manage "
+        "(retrieval with a stage-by-stage trace) or rag_answer (cited answer from the sources only; it never "
+        "reads memories). Knowledge bases have scope 'platform' (shared) or 'personal' (private). Manage "
         "sources with document_upload/update/delete (PDF via base64, Markdown/TXT via text); uploads by "
-        "employees into platform libraries wait for administrator approval. Keep long-term memory with "
-        "memory_* tools: search before answering, add durable facts/preferences, merge duplicates. Employee "
-        "writes to platform memory become proposals. IDs are decimal strings. rag_answer, memory_merge "
+        "employees into platform libraries wait for administrator approval. Long-term memories are always "
+        "private to the token owner: save durable facts/preferences you learned about the user with "
+        "memory_add (or memory_extract on conversation text), recall relevant ones with memory_search "
+        "before answering and inject them into your prompt. The server periodically consolidates large "
+        "memory collections automatically. IDs are decimal strings. rag_answer, memory_merge "
         "(without content), memory_extract and multi_query retrieval call the chat model and may incur cost."
     ),
 )
@@ -214,21 +216,6 @@ def _hit(row: dict[str, Any], rank: int) -> dict[str, Any]:
 
 def _actor() -> str:
     return f"user:{me().id}"
-
-
-def _visible(scope: str, row: dict[str, Any]) -> bool:
-    """Employees see active platform memories plus their own proposals."""
-    principal = me()
-    if scope == "personal" or principal.is_admin or row["status"] == "active":
-        return True
-    return row.get("created_by") == str(principal.id)
-
-
-async def _readable_memory(scope: str, memory_id: int) -> dict[str, Any]:
-    row = await memory.get_memory(memory_namespace(me(), scope), memory_id)
-    if not _visible(scope, row):
-        raise ToolError("资源不存在")
-    return row
 
 
 # ───────────────────────────── knowledge bases & retrieval ─────────────────────────────
@@ -332,13 +319,11 @@ async def rag_search(knowledge_base_id: str, query: str, top_k: int = 5, method:
 
 
 @mcp.tool(annotations=READ)
-async def rag_answer(knowledge_base_id: str, question: str, use_memory: bool = True, top_k: int = 5,
+async def rag_answer(knowledge_base_id: str, question: str, top_k: int = 5,
                      method: Method = "auto", retrieval: dict[str, Any] | None = None,
                      include_trace: bool = False) -> dict[str, Any]:
     """Answer a question from the knowledge base with verified citations (calls the chat model).
 
-    With use_memory, the caller's standing preferences/instructions, platform memories and memories
-    relevant to the question personalize the answer, memories are never cited.
     The model abstains when the retrieved sources do not support an answer.
     """
     async def run() -> dict:
@@ -347,13 +332,9 @@ async def rag_answer(knowledge_base_id: str, question: str, use_memory: bool = T
             raise ToolError("question must be nonempty and top_k between 1 and 20")
         config = await _config(kb, method, top_k, retrieval, None)
         runtime = await resolve_settings()
-        memories = None
-        if use_memory:
-            memories = await memory.memories_for_answer(me().memory_namespace, question, runtime=runtime) or None
         started, error, count = time.perf_counter(), None, 0
         try:
-            result = await rag.answer_question(kb.id, question.strip(), retrieval=config, runtime_settings=runtime,
-                                               memories=memories)
+            result = await rag.answer_question(kb.id, question.strip(), retrieval=config, runtime_settings=runtime)
             count, error = len(result["citations"]), result.get("error")
         except Exception as exc:
             error = type(exc).__name__
@@ -364,7 +345,7 @@ async def rag_answer(knowledge_base_id: str, question: str, use_memory: bool = T
                             latency_ms=(time.perf_counter() - started) * 1000, error=error)
         response = {"answer": result["answer"], "abstain": result["abstain"],
                     "citations": [_hit(row, rank) for rank, row in enumerate(result["citations"], 1)],
-                    "memories_used": memories or [], "timing": result["timing"], "usage": result["usage"]}
+                    "timing": result["timing"], "usage": result["usage"]}
         if include_trace:
             response["trace"] = result["trace"]
         return response
@@ -458,121 +439,99 @@ async def document_delete(document_id: str) -> dict[str, Any]:
 # ───────────────────────────── memory ─────────────────────────────
 
 @mcp.tool(annotations=WRITE)
-async def memory_add(content: str, scope: Scope = "personal", category: Category = "other",
+async def memory_add(content: str, category: Category = "other",
                      tags: list[str] | None = None, importance: int = 3, attributes: dict[str, Any] | None = None,
                      on_duplicate: Literal["skip", "update", "insert"] = "skip",
                      dedupe_threshold: float = 0.92) -> dict[str, Any]:
-    """Store a long-term memory (one self-contained fact per memory).
+    """Store a long-term memory about the caller (one self-contained fact per memory).
 
-    scope="personal" (default) is private to the caller. scope="platform" is shared with everyone:
-    administrators write directly, employees submit a proposal (status "pending") for approval.
-    Near-duplicates (same normalized text or cosine >= dedupe_threshold) are detected: "skip" returns the
-    existing memory, "update" rewrites it with the new content, "insert" stores anyway.
+    Memories are private to the calling account. Near-duplicates (same normalized text or cosine
+    >= dedupe_threshold) are detected: "skip" returns the existing memory, "update" rewrites it with
+    the new content, "insert" stores anyway.
     """
-    proposal = scope == "platform" and not me().is_admin
-    return await _call(memory.add_memory(memory_namespace(me(), scope), content, category=category, tags=tags,
-                                         importance=importance, attributes=attributes,
-                                         on_duplicate="skip" if proposal else on_duplicate,
-                                         dedupe_threshold=dedupe_threshold, source="mcp", created_by=me().id,
-                                         pending=proposal))
+    return await _call(memory.add_memory(me().memory_namespace, content, category=category, tags=tags,
+                                         importance=importance, attributes=attributes, on_duplicate=on_duplicate,
+                                         dedupe_threshold=dedupe_threshold, source="mcp", created_by=me().id))
 
 
 @mcp.tool(annotations=READ)
-async def memory_search(query: str, scope: Scope = "personal", top_k: int = 5, categories: list[str] | None = None,
+async def memory_search(query: str, top_k: int = 5, categories: list[str] | None = None,
                         tags: list[str] | None = None, min_importance: int | None = None,
                         min_similarity: float | None = None) -> dict[str, Any]:
-    """Semantic + keyword search over active memories of one scope (ranked, with similarity)."""
-    return await _call(memory.search_memories(memory_namespace(me(), scope), query, top_k=top_k,
+    """Semantic + keyword search over the caller's active memories (ranked, with similarity)."""
+    return await _call(memory.search_memories(me().memory_namespace, query, top_k=top_k,
                                               categories=categories, tags=tags, min_importance=min_importance,
                                               min_similarity=min_similarity))
 
 
 @mcp.tool(annotations=READ)
-async def memory_list(scope: Scope = "personal",
-                      status: Literal["active", "pending", "rejected", "merged", "deleted", "all"] = "active",
+async def memory_list(status: Literal["active", "merged", "deleted", "all"] = "active",
                       category: str | None = None, tag: str | None = None, limit: int = 50,
                       offset: int = 0) -> dict[str, Any]:
-    """List memories newest first, with paging and filters. Employees see their own platform proposals."""
-    created_by = me().id if scope == "platform" and not me().is_admin and status != "active" else None
-    return await _call(memory.list_memories(memory_namespace(me(), scope), status=status, category=category,
-                                            tag=tag, limit=limit, offset=offset, created_by=created_by))
+    """List the caller's memories newest first, with paging and filters."""
+    return await _call(memory.list_memories(me().memory_namespace, status=status, category=category,
+                                            tag=tag, limit=limit, offset=offset))
 
 
 @mcp.tool(annotations=READ)
-async def memory_get(memory_id: str, scope: Scope = "personal") -> dict[str, Any]:
+async def memory_get(memory_id: str) -> dict[str, Any]:
     """Get one memory."""
-    return await _call(_readable_memory(scope, _id(memory_id, "memory_id")))
+    return await _call(memory.get_memory(me().memory_namespace, _id(memory_id, "memory_id")))
 
 
 @mcp.tool(annotations=WRITE)
-async def memory_update(memory_id: str, scope: Scope = "personal", content: str | None = None,
+async def memory_update(memory_id: str, content: str | None = None,
                         category: Category | None = None, tags: list[str] | None = None,
                         importance: int | None = None, attributes: dict[str, Any] | None = None,
                         expected_version: int | None = None) -> dict[str, Any]:
-    """Update a memory (platform: administrators only).
+    """Update a memory.
 
     Pass expected_version (from memory_get) to avoid overwriting concurrent edits.
     """
-    async def run() -> dict:
-        require_memory_admin(me(), scope)
-        return await memory.update_memory(memory_namespace(me(), scope), _id(memory_id, "memory_id"),
-                                          content=content, category=category, tags=tags, importance=importance,
-                                          attributes=attributes, expected_version=expected_version,
-                                          actor=_actor())
-    return await _call(run())
+    return await _call(memory.update_memory(me().memory_namespace, _id(memory_id, "memory_id"),
+                                            content=content, category=category, tags=tags, importance=importance,
+                                            attributes=attributes, expected_version=expected_version,
+                                            actor=_actor()))
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
-async def memory_delete(memory_ids: list[str], scope: Scope = "personal", hard: bool = False) -> dict[str, Any]:
-    """Delete memories. Soft delete (default) can be undone with memory_restore, hard=True purges.
-
-    Platform memories: administrators only, employees may withdraw their own pending proposals.
-    """
+async def memory_delete(memory_ids: list[str], hard: bool = False) -> dict[str, Any]:
+    """Delete memories. Soft delete (default) can be undone with memory_restore, hard=True purges."""
     async def run() -> dict:
         ids = [_id(m, "memory_id") for m in memory_ids]
-        if scope == "platform" and not me().is_admin:
-            for memory_id in ids:
-                row = await _readable_memory(scope, memory_id)
-                if row["status"] != "pending" or row.get("created_by") != str(me().id):
-                    raise ToolError("只有管理员可以删除平台记忆，员工仅可撤回自己待审批的提议")
-        return await memory.delete_memories(memory_namespace(me(), scope), ids, hard=hard, actor=_actor())
+        return await memory.delete_memories(me().memory_namespace, ids, hard=hard, actor=_actor())
     return await _call(run())
 
 
 @mcp.tool(annotations=WRITE)
-async def memory_restore(memory_id: str, scope: Scope = "personal") -> dict[str, Any]:
-    """Restore a soft-deleted memory (platform: administrators only)."""
-    async def run() -> dict:
-        require_memory_admin(me(), scope)
-        return await memory.restore_memory(memory_namespace(me(), scope), _id(memory_id, "memory_id"),
-                                           actor=_actor())
-    return await _call(run())
+async def memory_restore(memory_id: str) -> dict[str, Any]:
+    """Restore a soft-deleted memory."""
+    return await _call(memory.restore_memory(me().memory_namespace, _id(memory_id, "memory_id"),
+                                             actor=_actor()))
 
 
 @mcp.tool(annotations=WRITE)
-async def memory_merge(memory_ids: list[str], scope: Scope = "personal", content: str | None = None,
+async def memory_merge(memory_ids: list[str], content: str | None = None,
                        category: Category | None = None, tags: list[str] | None = None,
                        importance: int | None = None) -> dict[str, Any]:
     """Merge 2+ memories into a new one, sources are marked merged and linked to it.
 
     Without `content` the chat model writes the consolidated memory (later notes win on conflict).
-    Tags are unioned and importance takes the maximum unless given. Platform: administrators only.
+    Tags are unioned and importance takes the maximum unless given.
     """
-    async def run() -> dict:
-        require_memory_admin(me(), scope)
-        return await memory.merge_memories(memory_namespace(me(), scope), [_id(m, "memory_id") for m in memory_ids],
-                                           content=content, category=category, tags=tags, importance=importance,
-                                           actor=_actor())
-    return await _call(run())
+    return await _call(memory.merge_memories(me().memory_namespace, [_id(m, "memory_id") for m in memory_ids],
+                                             content=content, category=category, tags=tags,
+                                             importance=importance, actor=_actor()))
 
 
 @mcp.tool(annotations=READ)
-async def memory_history(memory_id: str, scope: Scope = "personal") -> dict[str, Any]:
-    """Audit trail of a memory: create/update/delete/merge/restore/purge/approve with snapshots."""
-    async def run() -> dict:
-        await _readable_memory(scope, _id(memory_id, "memory_id"))
-        return {"events": await memory.memory_history(memory_namespace(me(), scope), _id(memory_id, "memory_id"))}
-    return await _call(run())
+async def memory_history(memory_id: str) -> dict[str, Any]:
+    """Audit trail of a memory: create/update/delete/merge/restore/purge with before/after snapshots."""
+    return await _call(_memory_events(_id(memory_id, "memory_id")))
+
+
+async def _memory_events(memory_id: int) -> dict[str, Any]:
+    return {"events": await memory.memory_history(me().memory_namespace, memory_id)}
 
 
 @mcp.tool(annotations=WRITE)
@@ -597,7 +556,7 @@ async def memory_clear(confirm: bool, hard: bool = False) -> dict[str, Any]:
 
 @mcp.tool(annotations=READ)
 async def review_list() -> dict[str, Any]:
-    """(Admin) Pending employee uploads into platform libraries and pending platform memory proposals."""
+    """(Admin) Pending employee uploads into platform libraries."""
     async with Session() as db:
         rows = (await db.execute(
             select(Document, KnowledgeBase.name, User.username)
@@ -607,16 +566,14 @@ async def review_list() -> dict[str, Any]:
             .order_by(Document.id))).all()
     documents = [{**document_json(document), "knowledge_base_name": kb_name, "uploader": username or ""}
                  for document, kb_name, username in rows]
-    return {"documents": documents, "memories": await memory.pending_platform_memories()}
+    return {"documents": documents}
 
 
 @mcp.tool(annotations=WRITE)
-async def review_decide(kind: Literal["document", "memory"], id: str, approve: bool,
-                        note: str = "") -> dict[str, Any]:
-    """(Admin) Approve or reject a pending document (approval starts parsing) or platform memory."""
+async def review_decide(id: str, approve: bool, note: str = "",
+                        kind: Literal["document"] = "document") -> dict[str, Any]:
+    """(Admin) Approve or reject a pending document upload (approval starts parsing)."""
     async def run() -> dict:
-        if kind == "memory":
-            return await memory.review_memory(_id(id), approve=approve, reviewer_id=me().id, note=note)
         async with Session() as db:
             document_id = _id(id)
             await owned(db, KnowledgeBase, (await owned(db, Document, document_id)).knowledge_base_id, lock=True)
@@ -699,24 +656,21 @@ async def tuning_apply(run_id: str, candidate: str) -> dict[str, Any]:
 mcp_http_app = mcp.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True)
 
 
-async def _stdio(with_worker: bool, token: str) -> None:
+async def _stdio(token: str) -> None:
     global _stdio_principal
     async with Session() as db:
         _stdio_principal = await resolve_api_token(db, token)
         await db.commit()
     if _stdio_principal is None:
         raise SystemExit("RAG_MCP_TOKEN (or --token) must be a valid personal access token (rwb_...)")
-    worker = None
-    if with_worker:
-        from app.worker import serve_worker
-        worker = asyncio.create_task(serve_worker(), name="rag-worker")
+    from app.worker import serve_worker
+    worker = asyncio.create_task(serve_worker(), name="rag-worker")
     try:
         await mcp.run_stdio_async()
     finally:
-        if worker:
-            worker.cancel()
-            with suppress(asyncio.CancelledError):
-                await worker
+        worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker
 
 
 def _token_argument(argv: list[str]) -> str:
@@ -732,4 +686,4 @@ if __name__ == "__main__":
 
     logger.remove()
     logger.add(sys.stderr, diagnose=False, backtrace=False)  # stdout carries the MCP protocol
-    asyncio.run(_stdio("--with-worker" in sys.argv, _token_argument(sys.argv)))
+    asyncio.run(_stdio(_token_argument(sys.argv)))

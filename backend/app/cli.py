@@ -30,8 +30,8 @@ async def backfill(db, admin: User) -> dict[str, int]:
     conversations = await db.execute(update(Conversation).where(
         Conversation.tenant_id == tenant, Conversation.owner_id.is_(None)).values(owner_id=admin.id))
     memories = await db.execute(update(Memory).where(
-        Memory.tenant_id == tenant, Memory.user_id != "platform", ~Memory.user_id.like("user:%"),
-    ).values(user_id=f"user:{admin.id}", scope="personal"))
+        Memory.tenant_id == tenant, ~Memory.user_id.like("user:%"),
+    ).values(user_id=f"user:{admin.id}"))
     return {"knowledge_bases": kbs.rowcount, "conversations": conversations.rowcount, "memories": memories.rowcount}
 
 

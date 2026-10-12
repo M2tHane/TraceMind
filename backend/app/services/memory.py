@@ -1,9 +1,9 @@
-"""Long-term memory: store, deduplicate, search, update, merge, review and audit.
+"""Long-term memory: store, deduplicate, search, update, merge and audit.
 
-Memories live in a namespace (the ``user_id`` column): ``platform`` for organization-wide
-memories every account reads, or ``user:<account id>`` for one employee's personal memories.
-Employee proposals for the platform namespace wait in ``pending`` until an administrator
-approves them; only ``active`` memories are ever searched or used in answers. Vectors
+Memories belong to one user, kept in a namespace (the ``user_id`` column) of the form
+``user:<account id>``. Other agents save memories they extracted for a user through the MCP
+server and recall them later to enrich their prompts; only ``active`` memories are ever
+searched or used in answers. Vectors
 live next to the row in PostgreSQL (``REAL[]``) and are searched per user by exact
 cosine similarity, which is precise and transactionally consistent for the
 hundreds-to-thousands of memories one user owns. Search fuses vector and BM25
@@ -11,7 +11,8 @@ rankings with RRF; when embedding is unavailable, memories are still stored and
 remain findable lexically.
 
 Model calls (embedding, merge, extraction) never run inside a database transaction.
-Every change appends a MemoryEvent with before/after snapshots.
+Every change appends a MemoryEvent with before/after snapshots. Scheduled consolidation of
+large collections lives in ``app.services.memory_consolidation``.
 """
 from __future__ import annotations
 
@@ -153,12 +154,9 @@ async def add_memory(
     user_id: str, content: str, *, category: str = "other", tags: list[str] | None = None,
     importance: int = 3, attributes: dict | None = None, expires_at: datetime | None = None,
     source: str = "api", on_duplicate: OnDuplicate = "skip", dedupe_threshold: float = 0.92,
-    runtime: Settings | None = None, created_by: int | None = None, pending: bool = False,
+    runtime: Settings | None = None, created_by: int | None = None,
 ) -> dict[str, Any]:
-    """Create a memory unless an equivalent active one exists (see ``on_duplicate``).
-
-    ``pending`` stores a proposal awaiting review; it is never merged into an existing memory.
-    """
+    """Create a memory unless an equivalent active one exists (see ``on_duplicate``)."""
     user_id, content = valid_user(user_id), _content(content)
     category, tags, importance = _category(category), _tags(tags), _importance(importance)
     if on_duplicate not in ("skip", "update", "insert") or not 0.5 <= dedupe_threshold <= 1.0:
@@ -181,7 +179,7 @@ async def add_memory(
                     best = int(np.argmax(scores))
                     if float(scores[best]) >= dedupe_threshold:
                         duplicate, similarity = candidates[best], round(float(scores[best]), 4)
-        if duplicate is not None and (on_duplicate == "skip" or pending):
+        if duplicate is not None and on_duplicate == "skip":
             return {"action": "duplicate", "similarity": similarity, "memory": memory_json(duplicate)}
         if duplicate is not None:
             row = await _owned(db, user_id, duplicate.id, lock=True)
@@ -203,11 +201,10 @@ async def add_memory(
                      category=category, tags=tags, importance=importance, source=source[:50],
                      attributes=attributes or {}, content_hash=digest, embedding=vector,
                      embedding_model=identity if vector is not None else "", expires_at=expires_at,
-                     status="pending" if pending else "active", version=1, access_count=0,
-                     scope="platform" if user_id == "platform" else "personal", created_by=created_by)
+                     status="active", version=1, access_count=0, created_by=created_by)
         db.add(row)
         await _record(db, row, "create", None, source)
-        return {"action": "pending" if pending else "created", "similarity": similarity, "memory": memory_json(row)}
+        return {"action": "created", "similarity": similarity, "memory": memory_json(row)}
 
 
 async def search_memories(
@@ -267,12 +264,11 @@ async def search_memories(
 
 async def list_memories(
     user_id: str, *, status: str = "active", category: str | None = None, tag: str | None = None,
-    limit: int = 50, offset: int = 0, created_by: int | None = None,
+    limit: int = 50, offset: int = 0,
 ) -> dict[str, Any]:
     user_id = valid_user(user_id)
-    if status not in ("active", "pending", "rejected", "merged", "deleted", "all") or not 1 <= limit <= 500 \
-            or offset < 0:
-        raise MemoryError("status 须为 active/pending/rejected/merged/deleted/all，limit 须在 1-500 之间")
+    if status not in ("active", "merged", "deleted", "all") or not 1 <= limit <= 500 or offset < 0:
+        raise MemoryError("status 须为 active/merged/deleted/all，limit 须在 1-500 之间")
     async with Session() as db:
         statement = scoped(Memory).where(Memory.user_id == user_id)
         if status != "all":
@@ -281,8 +277,6 @@ async def list_memories(
             statement = statement.where(Memory.category == _category(category))
         if tag:
             statement = statement.where(Memory.tags.contains([tag]))
-        if created_by is not None:
-            statement = statement.where(Memory.created_by == created_by)
         total = await db.scalar(select(func.count()).select_from(statement.subquery()))
         rows = (await db.scalars(statement.order_by(Memory.updated_at.desc(), Memory.id.desc())
                                  .limit(limit).offset(offset))).all()
@@ -409,7 +403,6 @@ async def merge_memories(
                         tags=_tags(tags) if tags is not None else merged_tags,
                         importance=_importance(importance) if importance is not None else merged_importance,
                         source="merge", attributes={**merged_attributes, "merged_from": [str(i) for i in ids]},
-                        scope="platform" if user_id == "platform" else "personal",
                         content_hash=content_hash(content), embedding=vectors[0] if vectors else None,
                         embedding_model=identity if vectors else "", status="active", version=1, access_count=0)
         db.add(target)
@@ -506,56 +499,3 @@ async def reembed_user(user_id: str) -> dict[str, Any]:
                     updated += 1
     return {"user_id": user_id, "reembedded": updated, "pending": len(items)}
 
-
-async def memories_for_answer(user_id: str, question: str, *, runtime: Settings | None = None,
-                              relevant_k: int = 5, min_similarity: float = 0.35, standing_k: int = 3,
-                              include_platform: bool = True) -> list[str]:
-    """Memories that should personalize one answer: the user's own plus platform memories.
-
-    Standing preferences/instructions apply to every question, so the most important ones
-    are always included. Other memories must be relevant: a lexical match, or vector
-    similarity of at least ``min_similarity``.
-    """
-    chosen = await _namespace_memories(user_id, question, runtime, relevant_k, min_similarity, standing_k)
-    if include_platform and user_id != "platform":
-        for content in await _namespace_memories("platform", question, runtime, relevant_k, min_similarity,
-                                                 standing_k):
-            if content not in chosen:
-                chosen.append(content)
-    return chosen
-
-
-async def _namespace_memories(user_id: str, question: str, runtime: Settings | None, relevant_k: int,
-                              min_similarity: float, standing_k: int) -> list[str]:
-    found = await search_memories(user_id, question, top_k=relevant_k, runtime=runtime)
-    relevant = [row for row in found["results"]
-                if row["similarity"] is None or row["similarity"] >= min_similarity]
-    async with Session() as db:
-        standing = (await db.scalars(_active(valid_user(user_id)).where(
-            Memory.category.in_(("preference", "instruction")),
-        ).order_by(Memory.importance.desc(), Memory.updated_at.desc()).limit(standing_k))).all()
-    chosen = {row["id"]: row["content"] for row in relevant}
-    for row in standing:
-        chosen.setdefault(str(row.id), row.content)
-    return list(chosen.values())
-
-
-async def pending_platform_memories(limit: int = 200) -> list[dict[str, Any]]:
-    async with Session() as db:
-        rows = (await db.scalars(scoped(Memory).where(Memory.user_id == "platform", Memory.status == "pending")
-                                 .order_by(Memory.id).limit(limit))).all()
-        return [memory_json(row) for row in rows]
-
-
-async def review_memory(memory_id: int, *, approve: bool, reviewer_id: int, note: str = "") -> dict[str, Any]:
-    """Approve or reject a pending platform memory proposal."""
-    async with Session() as db, db.begin():
-        row = await _owned(db, "platform", memory_id, lock=True)
-        if row.status != "pending":
-            raise MemoryError("该平台记忆不在待审批状态", 409)
-        before = _snapshot(row)
-        row.status, row.reviewed_by = ("active" if approve else "rejected"), reviewer_id
-        if note:
-            row.attributes = {**row.attributes, "review_note": note[:500]}
-        await _record(db, row, "approve" if approve else "reject", before, f"user:{reviewer_id}")
-        return memory_json(row)

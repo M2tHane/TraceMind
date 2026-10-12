@@ -132,7 +132,7 @@ async def create_message(conversation_id: ResourceID, request: MessageCreate,
         enqueue(db, "chat", assistant.id, params={
             "question": request.content, "method": request.method, "model_config": model_snapshot,
             "top_k": request.top_k, "candidate_k": request.candidate_k,
-            "retrieval": retrieval, "memory_namespace": principal.memory_namespace,
+            "retrieval": retrieval,
             "principal": {"id": principal.id, "username": principal.username, "role": principal.role},
             "kb_scope": kb.scope,
         })

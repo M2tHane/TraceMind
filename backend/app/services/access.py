@@ -6,8 +6,7 @@ Rules:
   * Personal libraries are visible to and managed by their owner only (administrators
     included: they manage accounts, not employees' private content).
   * Unapproved platform documents are visible to administrators and their uploader only.
-  * Memory namespaces: "platform" (everyone reads, administrators write, employees
-    propose) and "user:<id>" (owner only).
+  * Memories are always private to their owner (namespace "user:<id>").
 Invisible resources answer 404, so identifiers of private resources are not confirmed.
 """
 from __future__ import annotations
@@ -21,8 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.common import owned
 from app.models import Document, KnowledgeBase
 from app.services.auth import Principal
-
-PLATFORM_NAMESPACE = "platform"
 
 
 def visible_kbs(principal: Principal) -> Any:
@@ -88,16 +85,3 @@ def check_document_removal(principal: Principal, kb: KnowledgeBase, document: Do
     if not withdrawing and not can_manage_kb(principal, kb):
         raise HTTPException(403, "只有管理员可以修改或删除平台知识库中的文档")
 
-
-def memory_namespace(principal: Principal, scope: str) -> str:
-    if scope == "platform":
-        return PLATFORM_NAMESPACE
-    if scope == "personal":
-        return principal.memory_namespace
-    raise HTTPException(422, "scope 须为 personal 或 platform")
-
-
-def require_memory_admin(principal: Principal, scope: str) -> None:
-    """Direct changes to platform memories are administrator-only (employees propose)."""
-    if scope == "platform" and not principal.is_admin:
-        raise HTTPException(403, "只有管理员可以直接修改平台记忆；员工请提交待审批的平台记忆")

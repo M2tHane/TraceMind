@@ -1,15 +1,16 @@
-"""Administrator console: accounts, approvals for platform content, query and MCP call logs."""
+"""Administrator console: accounts, document approvals, memory consolidation, query and MCP call logs."""
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
 from pydantic import Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.api.common import owned, scoped, serialize
 from app.api.deps import AdminUser, require_admin
@@ -17,7 +18,7 @@ from app.config import settings
 from app.db import get_db
 from app.models import Document, KnowledgeBase, McpCallLog, QueryLog, User
 from app.schemas import InputModel
-from app.services import memory
+from app.services import memory_consolidation
 from app.services.auth import (
     AuthError,
     hash_password,
@@ -30,6 +31,14 @@ from app.services.documents import document_json, review_document
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 DB = Annotated[AsyncSession, Depends(get_db)]
 ID = Annotated[int, PathParam(gt=0, le=2**63 - 1)]
+
+
+def _page(limit: int, offset: int) -> dict[str, int]:
+    return {"limit": limit, "offset": offset}
+
+
+Limit = Annotated[int, Query(ge=1, le=500)]
+Offset = Annotated[int, Query(ge=0)]
 
 
 class UserCreate(InputModel):
@@ -149,21 +158,61 @@ async def pending_reviews(db: DB) -> dict[str, Any]:
     documents = [{**document_json(document), "knowledge_base_name": kb_name,
                   "uploader": {"username": username or "", "display_name": display_name or ""}}
                  for document, kb_name, username, display_name in rows]
-    memories = await memory.pending_platform_memories()
-    authors = {int(row["created_by"]) for row in memories if row.get("created_by")}
-    names = dict((await db.execute(select(User.id, User.username).where(User.id.in_(authors)))).all()) \
-        if authors else {}
-    for row in memories:
-        row["author"] = names.get(int(row["created_by"]), "") if row.get("created_by") else ""
-    return {"documents": documents, "memories": memories}
+    return {"documents": documents}
 
 
 @router.get("/reviews/count")
 async def pending_count(db: DB) -> dict[str, int]:
     documents = await db.scalar(select(func.count(Document.id)).where(
         Document.tenant_id == settings.tenant_id, Document.review_status == "pending")) or 0
-    memories = len(await memory.pending_platform_memories(limit=1000))
-    return {"documents": documents, "memories": memories, "total": documents + memories}
+    return {"documents": documents, "total": documents}
+
+
+def _like(value: str) -> str:
+    return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+@router.get("/reviews/history")
+async def review_history(db: DB, result: Literal["approved", "rejected"] | None = None,
+                         type: Literal["document"] | None = None, q: str | None = None,
+                         uploader_id: int | None = None, since: datetime | None = None,
+                         until: datetime | None = None, limit: Limit = 50, offset: Offset = 0) -> dict[str, Any]:
+    """Documents an administrator has already approved or rejected, newest decision first.
+
+    ``counts`` ignores ``result`` so a result switcher can show every tab's size.
+    """
+    uploader, reviewer = aliased(User), aliased(User)
+    conditions = [Document.tenant_id == settings.tenant_id, Document.review_status.in_(("approved", "rejected")),
+                  Document.reviewed_at.is_not(None)]
+    if q:
+        conditions.append(or_(Document.filename.ilike(_like(q), escape="\\"),
+                              Document.review_note.ilike(_like(q), escape="\\")))
+    if uploader_id is not None:
+        conditions.append(Document.uploaded_by == uploader_id)
+    if since:
+        conditions.append(Document.reviewed_at >= since)
+    if until:
+        conditions.append(Document.reviewed_at < until)
+    counted = dict((await db.execute(
+        select(Document.review_status, func.count(Document.id)).where(*conditions)
+        .group_by(Document.review_status))).all())
+    base = (select(Document, KnowledgeBase.name, uploader.username, uploader.display_name,
+                   reviewer.username, reviewer.display_name)
+            .join(KnowledgeBase, KnowledgeBase.id == Document.knowledge_base_id)
+            .outerjoin(uploader, uploader.id == Document.uploaded_by)
+            .outerjoin(reviewer, reviewer.id == Document.reviewed_by)
+            .where(*conditions))
+    statement = base.where(Document.review_status == result) if result else base
+    rows = (await db.execute(statement.order_by(Document.reviewed_at.desc(), Document.id.desc())
+                             .limit(limit).offset(offset))).all()
+    items = [{**document_json(document), "knowledge_base_name": kb_name, "result": document.review_status,
+              "uploader": {"username": up_name or "", "display_name": up_display or ""},
+              "reviewer": {"username": rv_name or "", "display_name": rv_display or ""}}
+             for document, kb_name, up_name, up_display, rv_name, rv_display in rows]
+    approved, rejected = counted.get("approved", 0), counted.get("rejected", 0)
+    return {"total": counted.get(result, 0) if result else approved + rejected, "items": items,
+            "counts": {"all": approved + rejected, "approved": approved, "rejected": rejected},
+            **_page(limit, offset)}
 
 
 @router.post("/reviews/documents/{document_id}")
@@ -174,38 +223,53 @@ async def decide_document(document_id: ID, body: ReviewDecision, principal: Admi
     return document_json(document)
 
 
-@router.post("/reviews/memories/{memory_id}")
-async def decide_memory(memory_id: ID, body: ReviewDecision, principal: AdminUser) -> dict[str, Any]:
+# ---------------------------------------------------------------- memory consolidation
+
+
+@router.get("/memory/consolidation")
+async def consolidation_overview() -> dict[str, Any]:
+    """Consolidation settings, the latest 20 runs and the users currently above the threshold."""
+    return await memory_consolidation.overview(limit=20)
+
+
+@router.post("/memory/consolidate", status_code=202)
+async def consolidate_memories() -> dict[str, Any]:
+    """Queue a consolidation run for the worker; answers at once with the new run."""
     try:
-        return await memory.review_memory(memory_id, approve=body.approve, reviewer_id=principal.id,
-                                          note=body.note)
-    except memory.MemoryError as error:
-        raise HTTPException(error.status, str(error)) from None
+        return await memory_consolidation.create_run("manual")
+    except memory_consolidation.ConsolidationBusy as error:
+        raise HTTPException(409, str(error)) from None
 
 
 # ---------------------------------------------------------------- logs
 
 
-def _page(limit: int, offset: int) -> dict[str, int]:
-    return {"limit": limit, "offset": offset}
-
-
-Limit = Annotated[int, Query(ge=1, le=500)]
-Offset = Annotated[int, Query(ge=0)]
-
-
 @router.get("/query-logs")
-async def query_logs(db: DB, user_id: int | None = None, knowledge_base_id: int | None = None,
+async def query_logs(db: DB, user_id: int | None = None,
+                     knowledge_base_id: Annotated[list[int] | None, Query()] = None,
+                     include_personal: bool = False,
                      source: Literal["chat", "debug", "mcp"] | None = None,
                      kb_scope: Literal["platform", "personal"] | None = None,
                      status: Literal["ok", "error"] | None = None, q: str | None = None,
                      since: datetime | None = None, until: datetime | None = None,
+                     today_since: datetime | None = None,
                      limit: Limit = 50, offset: Offset = 0) -> dict[str, Any]:
+    """Query log page. ``knowledge_base_id`` may repeat; ``include_personal`` adds every personal library.
+
+    ``today`` counts the day starting at ``today_since`` (default: UTC midnight) regardless of the filters.
+    """
     statement = scoped(QueryLog)
-    for column, value in ((QueryLog.user_id, user_id), (QueryLog.knowledge_base_id, knowledge_base_id),
-                          (QueryLog.source, source), (QueryLog.kb_scope, kb_scope), (QueryLog.status, status)):
+    for column, value in ((QueryLog.user_id, user_id), (QueryLog.source, source),
+                          (QueryLog.kb_scope, kb_scope), (QueryLog.status, status)):
         if value is not None:
             statement = statement.where(column == value)
+    if knowledge_base_id or include_personal:
+        choices = []
+        if knowledge_base_id:
+            choices.append(QueryLog.knowledge_base_id.in_(knowledge_base_id))
+        if include_personal:
+            choices.append(QueryLog.kb_scope == "personal")
+        statement = statement.where(or_(*choices))
     if q:
         pattern = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         statement = statement.where(QueryLog.query.ilike(f"%{pattern}%", escape="\\"))
@@ -217,7 +281,12 @@ async def query_logs(db: DB, user_id: int | None = None, knowledge_base_id: int 
     rows = (await db.scalars(statement.order_by(QueryLog.id.desc()).limit(limit).offset(offset))).all()
     names = await _kb_names(db, {row.knowledge_base_id for row in rows if row.knowledge_base_id})
     items = [{**serialize(row), "knowledge_base_name": names.get(row.knowledge_base_id, "")} for row in rows]
-    return {"total": total, "items": items, **_page(limit, offset)}
+    start = today_since or datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_count, day_failed = (await db.execute(
+        select(func.count(QueryLog.id), func.count(QueryLog.id).filter(QueryLog.status == "error"))
+        .where(QueryLog.tenant_id == settings.tenant_id, QueryLog.created_at >= start))).one()
+    return {"total": total, "items": items, "today": {"count": day_count, "failed": day_failed},
+            **_page(limit, offset)}
 
 
 @router.get("/mcp-logs")

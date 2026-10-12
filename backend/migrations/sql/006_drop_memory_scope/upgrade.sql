@@ -1,0 +1,2 @@
+ALTER TABLE memories DROP COLUMN IF EXISTS scope;
+ALTER TABLE memories DROP COLUMN IF EXISTS reviewed_by;

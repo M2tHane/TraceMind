@@ -143,7 +143,7 @@ class EvalItem(TenantModel):
 
 class Job(TenantModel):
     __tablename__ = "jobs"
-    job_type: Mapped[str] = mapped_column(String(30), comment="parse/chat/evaluate")
+    job_type: Mapped[str] = mapped_column(String(30), comment="parse/chat/evaluate/tune/consolidate")
     resource_id: Mapped[int] = mapped_column(BigInteger, index=True, comment="Target resource ID")
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True, comment="Queue state")
     params: Mapped[dict] = mapped_column(JSONB, default=dict, comment="Job parameters")
@@ -182,16 +182,14 @@ class Memory(TenantModel):
     __tablename__ = "memories"
     __table_args__ = (Index("ix_memories_scope", "tenant_id", "user_id", "status"),
                       {"comment": "Per-user long-term memories"})
-    user_id: Mapped[str] = mapped_column(String(128), comment="Namespace: platform or user:<account id>")
-    scope: Mapped[str] = mapped_column(String(20), default="personal", server_default="personal", comment="platform/personal")
+    user_id: Mapped[str] = mapped_column(String(128), comment="Owner namespace user:<account id>")
     created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Author account")
-    reviewed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Approver of a platform memory")
     content: Mapped[str] = mapped_column(Text, comment="Memory text")
     category: Mapped[str] = mapped_column(String(30), default="other", comment="preference/profile/fact/goal/instruction/other")
     tags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", comment="Free-form tags")
     importance: Mapped[int] = mapped_column(Integer, default=3, comment="1 (low) to 5 (high)")
     source: Mapped[str] = mapped_column(String(50), default="api", comment="Writer: api/mcp/extract/merge")
-    status: Mapped[str] = mapped_column(String(20), default="active", comment="active/pending/rejected/merged/deleted")
+    status: Mapped[str] = mapped_column(String(20), default="active", comment="active/merged/deleted")
     merged_into_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Merge target memory ID")
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", comment="Caller metadata")
     content_hash: Mapped[str] = mapped_column(String(64), comment="Normalized content SHA-256")
@@ -213,6 +211,22 @@ class MemoryEvent(TenantModel):
     before: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="State before change")
     after: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="State after change")
     actor: Mapped[str] = mapped_column(String(50), default="api", comment="api/mcp/system")
+
+
+class MemoryConsolidationRun(TenantModel):
+    __tablename__ = "memory_consolidation_runs"
+    __table_args__ = (Index("ix_memory_consolidation_runs_started", "tenant_id", "started_at"),
+                      Index("uq_memory_consolidation_running", "tenant_id", unique=True,
+                            postgresql_where=text("status = 'running'")),
+                      {"comment": "Scheduled and manual LLM memory consolidation runs"})
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), comment="Run start")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Run end")
+    status: Mapped[str] = mapped_column(String(20), default="running", comment="running/completed/failed")
+    trigger: Mapped[str] = mapped_column(String(20), default="schedule", comment="schedule/manual")
+    users_processed: Mapped[int] = mapped_column(Integer, default=0, comment="Users consolidated")
+    memories_merged: Mapped[int] = mapped_column(Integer, default=0, comment="Source memories merged away")
+    memories_archived: Mapped[int] = mapped_column(Integer, default=0, comment="Low-value memories soft-deleted")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Sanitized failure summary")
 
 
 class TuningRun(TenantModel):

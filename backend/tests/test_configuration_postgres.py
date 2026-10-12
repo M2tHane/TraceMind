@@ -53,9 +53,6 @@ async def test_saved_settings_and_queued_snapshot_with_real_postgres(monkeypatch
                 await db.rollback()
                 raise
 
-        async def fake_memories(*args, **kwargs):
-            return None
-
         @asynccontextmanager
         async def worker_session():
             yield db
@@ -63,7 +60,6 @@ async def test_saved_settings_and_queued_snapshot_with_real_postgres(monkeypatch
         app.dependency_overrides[get_db] = dependency
         app.dependency_overrides[current_principal] = lambda: Principal(id=1, username="admin", display_name="",
                                                                         role="admin")
-        monkeypatch.setattr(worker, "user_memories", fake_memories)
         monkeypatch.setattr(worker, "Session", worker_session)
         captured = []
 

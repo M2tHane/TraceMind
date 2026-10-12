@@ -9,25 +9,22 @@ from sqlalchemy import text, update
 from app.api.common import owned, scoped
 from app.config import settings
 from app.db import Session, engine
-from app.models import Conversation, Document, EvalItem, EvalRun, Job, Message, TuningRun
+from app.models import (
+    Conversation,
+    Document,
+    EvalItem,
+    EvalRun,
+    Job,
+    MemoryConsolidationRun,
+    Message,
+    TuningRun,
+)
 from app.services.configuration import resolve_settings
 from app.services.providers import ProviderError
 
 
 def safe_error(exc: Exception) -> str:
     return str(exc)[:1000] if isinstance(exc, ProviderError) else "任务执行失败，请检查服务连接及服务端日志后重试"
-
-
-async def user_memories(namespace: str | None, question: str, runtime_settings: object) -> list[str] | None:
-    """Best-effort personalization: memory lookup failures never block an answer."""
-    if not namespace:
-        return None
-    from app.services.memory import MemoryError, memories_for_answer
-    try:
-        return await memories_for_answer(namespace, question, runtime=runtime_settings) or None
-    except (MemoryError, ProviderError):
-        logger.warning("Memory lookup skipped for chat answer")
-        return None
 
 
 async def _log_chat(params: dict, kb_id: int, started: float, result_count: int = 0,
@@ -66,13 +63,12 @@ async def answer_message(message_id: int, params: dict) -> None:
             await db.commit()
 
     runtime_settings = await resolve_settings(params.get("model_config"))
-    memories = await user_memories(params.get("memory_namespace"), params["question"], runtime_settings)
     started = time.perf_counter()
     try:
         result = await answer_question(kb_id, params["question"], method=params.get("method", "hybrid_rerank"),
                                        top_k=params.get("top_k", 5), candidate_k=params.get("candidate_k", 20),
                                        history=history_rows, progress=progress, runtime_settings=runtime_settings,
-                                       retrieval=params.get("retrieval"), memories=memories)
+                                       retrieval=params.get("retrieval"))
     except Exception as exc:
         await _log_chat(params, kb_id, started, error=safe_error(exc))
         raise
@@ -83,7 +79,7 @@ async def answer_message(message_id: int, params: dict) -> None:
         message.citations, message.contexts = result["citations"], result["contexts"]
         message.timing, message.usage = result["timing"], result["usage"]
         message.retrieval_trace = {"config": result.get("retrieval_config"), "queries": result.get("queries", []),
-                                   "stages": result.get("trace", []), "memories_used": len(memories or [])}
+                                   "stages": result.get("trace", [])}
         message.status, message.stage, message.error = "completed", "completed", None
         await db.commit()
 
@@ -101,6 +97,9 @@ async def process_job(job_id: int, job_type: str, resource_id: int, params: dict
         elif job_type == "tune":
             from app.services.tuning import execute_tuning
             await execute_tuning(resource_id)
+        elif job_type == "consolidate":
+            from app.services.memory_consolidation import execute_run
+            await execute_run(resource_id)
         else:
             raise ValueError("Unsupported job type")
         async with Session() as db:
@@ -115,7 +114,8 @@ async def process_job(job_id: int, job_type: str, resource_id: int, params: dict
         async with Session() as db:
             job = await owned(db, Job, job_id)
             job.status, job.error = "failed", message
-            model = {"parse": Document, "chat": Message, "evaluate": EvalRun, "tune": TuningRun}.get(job_type)
+            model = {"parse": Document, "chat": Message, "evaluate": EvalRun, "tune": TuningRun,
+                     "consolidate": MemoryConsolidationRun}.get(job_type)
             if model:
                 row = await owned(db, model, resource_id)
                 row.status, row.error = "failed", message
@@ -163,9 +163,15 @@ async def serve_worker() -> None:
                     await db.execute(update(model).where(model.tenant_id == settings.tenant_id,
                                                          model.status == previous).values(status=next_state))
                 await db.commit()
+            from app.services import memory_consolidation
+            await memory_consolidation.recover_interrupted()
             tasks = [asyncio.create_task(lane(kind), name=f"rag-{kind}")
-                     for kind in ("parse", "chat", "chat", "evaluate", "tune")]
-            logger.info("Worker ready: parse=1, chat=2, evaluation=1, tuning=1")
+                     for kind in ("parse", "chat", "chat", "evaluate", "tune", "consolidate")]
+            if settings.memory_consolidation_enabled:
+                tasks.append(asyncio.create_task(memory_consolidation.scheduler(), name="rag-memory-consolidation"))
+            logger.info("Worker ready: parse=1, chat=2, evaluation=1, tuning=1, memory consolidation={}",
+                        f"every {settings.memory_consolidation_interval_minutes} min"
+                        if settings.memory_consolidation_enabled else "manual only")
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:

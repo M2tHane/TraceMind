@@ -427,7 +427,7 @@ async def test_no_context_chat_persists_user_assistant_and_exact_job_parameters(
     assert conversation.title == question[:48]
     assert job.resource_id == assistant.id
     assert job.params == {"question": question.strip(), "method": "no_context", "top_k": 5, "candidate_k": 20,
-                          "model_config": SNAPSHOT, "retrieval": None, "memory_namespace": "user:1",
+                          "model_config": SNAPSHOT, "retrieval": None,
                           "principal": {"id": 1, "username": "admin", "role": "admin"}, "kb_scope": "platform"}
     assert assistant.model_profile_id == 7 and "api_key_ciphertext" not in assistant.model_snapshot
     assert all(row.tenant_id == settings.tenant_id for row in added)

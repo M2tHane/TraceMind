@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with Session() as db:
         await bootstrap_configuration(db)
         await db.commit()
-    task = asyncio.create_task(serve_worker(), name="rag-worker") if settings.run_worker else None
+    task = asyncio.create_task(serve_worker(), name="rag-worker")
     try:
         # A mounted sub-application's lifespan never runs: the host must start the MCP session manager.
         async with mcp.session_manager.run():

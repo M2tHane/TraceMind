@@ -7,7 +7,7 @@ TraceMind 以 MCP 服务暴露知识库检索、文档管理、长期记忆和�
 | 方式 | 地址 / 命令 | 说明 |
 | --- | --- | --- |
 | Streamable HTTP（推荐） | `http://127.0.0.1:8010/mcp` | 随 `./scripts/dev.sh` 启动，与 API 共用进程和后台任务队列 |
-| stdio | `cd backend && RAG_MCP_TOKEN=rwb_... .venv/bin/python -m app.mcp_server` | 上传的文档仍需 API 进程的 worker 解析；无 API 进程时加 `--with-worker` |
+| stdio | `cd backend && RAG_MCP_TOKEN=rwb_... .venv/bin/python -m app.mcp_server` | 自带后台 worker；与 API 进程同时运行时，由数据库咨询锁保证只有一个 worker 工作（旧参数 `--with-worker` 仍被接受并忽略） |
 
 仅允许本机访问。两种方式都必须提供**个人访问令牌**：登录网页 →「我的账户」→「MCP 访问令牌」→ 新建（令牌只显示一次）。HTTP 用请求头 `Authorization: Bearer rwb_...`，stdio 用环境变量 `RAG_MCP_TOKEN` 或参数 `--token`。缺少或无效令牌返回 401；账号停用、令牌吊销或过期后立即失效。
 
@@ -39,7 +39,6 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 | | 平台（`platform`） | 个人（`personal`） |
 | --- | --- | --- |
 | 知识库 | 所有账号可见、可检索；管理员创建和管理（改配置、更新/删除文档）。员工上传的文档 `review_status=pending`，管理员审批通过后才解析入库 | 任何账号可创建，仅本人可见（管理员也看不到） |
-| 记忆 | 所有账号可读，问答时自动参与个性化；管理员直接写入，员工的 `memory_add(scope="platform")` 成为待审批提议 | 仅本人，默认范围 |
 
 - 评测调优与审批工具（`dataset_list`、`tuning_*`、`review_*`）仅管理员可用。
 - 每次工具调用都写入管理员可见的 MCP 调用日志：账号、令牌、工具名、耗时、状态，参数只记录编号、数值和文本长度，不记录正文。
@@ -56,7 +55,7 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 | `kb_create` | 新建知识库；`scope="personal"`（默认）或 `"platform"`（仅管理员） |
 | `kb_set_retrieval_config` | 设置或清除知识库默认检索流水线（需管理权限） |
 | `rag_search` | 只召回不生成；返回片段、分数和逐阶段 trace |
-| `rag_answer` | 带引用校验的问答；`use_memory=true`（默认）时用调用者的个人记忆和平台记忆做个性化（记忆不会作为引用） |
+| `rag_answer` | 带引用校验的问答，只依据召回的知识库材料，不读取记忆 |
 
 `rag_search` 的 `method`：`auto`（知识库调优后的默认配置，否则 `hybrid_rerank`）、`bm25`、`vector`、`hybrid`、`hybrid_rerank`；`retrieval` 传完整配置可覆盖；`document_ids` 限定文档范围。
 
@@ -71,17 +70,17 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 
 ### 记忆
 
-除 `memory_extract` / `memory_clear`（只作用于个人记忆）外，记忆工具都接受 `scope`：`personal`（默认）或 `platform`。
+记忆只属于令牌所属账号本人，供 Agent 自己写入和召回；网页问答和 `rag_answer` 都不会使用记忆。旧版本的 `scope` 参数仍可传入，但会被忽略。后台按设定间隔用对话模型自动整理超过阈值的记忆集合（合并相近条目、归档低价值条目）。
 
 | 工具 | 作用 |
 | --- | --- |
-| `memory_add` | 写入一条记忆；按规范化文本或向量相似度去重（`on_duplicate`: skip / update / insert）。员工写平台记忆返回 `action=pending` |
-| `memory_search` | 向量 + BM25 混合检索该范围的有效记忆 |
-| `memory_list` / `memory_get` | 分页列表 / 单条；`status` 支持 active/pending/rejected/merged/deleted/all（员工在平台范围只看到自己的提议） |
-| `memory_update` | 修改内容/分类/标签/重要度；传 `expected_version` 防止覆盖并发修改（平台范围仅管理员） |
-| `memory_delete` / `memory_restore` | 软删除（可恢复）或 `hard=true` 彻底清除（平台范围仅管理员；员工可撤回自己的待审批提议） |
-| `memory_merge` | 合并 2 条以上记忆为新记忆；未给 `content` 时由对话模型整合（平台范围仅管理员） |
-| `memory_history` | 审计记录（create/update/delete/restore/merge/purge/pending/approve/reject，含前后快照） |
+| `memory_add` | 写入一条记忆；按规范化文本或向量相似度去重（`on_duplicate`: skip / update / insert） |
+| `memory_search` | 向量 + BM25 混合检索本人的有效记忆 |
+| `memory_list` / `memory_get` | 分页列表 / 单条；`status` 支持 active/merged/deleted/all |
+| `memory_update` | 修改内容/分类/标签/重要度；传 `expected_version` 防止覆盖并发修改 |
+| `memory_delete` / `memory_restore` | 软删除（可恢复）或 `hard=true` 彻底清除 |
+| `memory_merge` | 合并 2 条以上记忆为新记忆；未给 `content` 时由对话模型整合 |
+| `memory_history` | 审计记录（create/update/delete/restore/merge/purge 等，含前后快照） |
 | `memory_extract` | 从对话文本抽取个人长期记忆并去重写入（调用对话模型） |
 | `memory_clear` | 清空本人全部个人记忆（需 `confirm=true`） |
 
@@ -89,8 +88,8 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 
 | 工具 | 作用 |
 | --- | --- |
-| `review_list` | 待审批的平台库文档（含知识库名、上传者）和平台记忆提议 |
-| `review_decide` | `kind` 为 `document` 或 `memory`，`approve=true` 通过（文档开始解析）或 `false` 驳回（文档原文件删除） |
+| `review_list` | 待审批的平台库文档（含知识库名、上传者） |
+| `review_decide` | 审批文档，`approve=true` 通过（文档开始解析）或 `false` 驳回（文档原文件删除） |
 
 ### 评估调优（管理员）
 
@@ -107,6 +106,6 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 
 ## 推荐 Agent 流程
 
-1. 回答前：`memory_search(问题)` 取个人偏好（需要时加 `scope="platform"` 取团队约定），`rag_search` 或 `rag_answer` 取知识。
+1. 回答前：`memory_search(问题)` 取用户的偏好和背景，由 Agent 自己注入提示词；`rag_search` 或 `rag_answer` 取知识。
 2. 回答后：用户表达了稳定偏好或事实时 `memory_add`；长对话结束后可 `memory_extract`。
-3. 定期：`memory_list` 检查相近条目，用 `memory_merge` 合并重复。
+3. 需要时：`memory_list` 检查相近条目，用 `memory_merge` 合并重复（服务端也会定期自动整理）。

@@ -177,8 +177,8 @@ def test_tuning_grid_presets_and_leaderboard() -> None:
     assert board[2]["failed"] == 1 and board[2]["mrr_at_10"] is None
 
 
-def test_answer_payload_carries_memories_without_citing_them() -> None:
-    # Memories enter the prompt payload separately from citable sources.
+def test_answer_payload_has_only_question_and_sources() -> None:
+    # Memories belong to MCP agents; RAG answers never see them.
     import json
 
     from app.services.providers import Providers
@@ -191,10 +191,10 @@ def test_answer_payload_carries_memories_without_citing_them() -> None:
     providers = Providers(SimpleNamespace(model_timeout=5, chat_api_key="", embedding_api_key="", rerank_api_key=""))
     providers._complete = complete
     import asyncio
-    result = asyncio.run(providers.answer("q", [CHUNKS[0]], memories=["prefers short answers"]))
+    result = asyncio.run(providers.answer("q", [CHUNKS[0]]))
     payload = json.loads(captured["messages"][-1]["content"])
-    assert payload["user_memories"] == ["prefers short answers"] and result["citations"] == ["a"]
-    assert "never be cited" in captured["messages"][0]["content"]
+    assert set(payload) == {"question", "sources"} and result["citations"] == ["a"]
+    assert "memor" not in captured["messages"][0]["content"]
     asyncio.run(providers.close())
 
 

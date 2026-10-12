@@ -71,9 +71,9 @@ async def workspace(monkeypatch: pytest.MonkeyPatch, tmp_path):
         scored = [{**r, "score": len(wanted & set(tokenize(r["text"]))) / (len(wanted) or 1)} for r in rows]
         return sorted(scored, key=lambda r: r["score"], reverse=True)
 
-    async def answer(self, question, contexts, method="hybrid_rerank", history=None, memories=None):
+    async def answer(self, question, contexts, method="hybrid_rerank", history=None):
         calls["answer"] += 1
-        return {"answer": f"answer with {len(memories or [])} memories", "citations": [contexts[0]["id"]],
+        return {"answer": "grounded answer", "citations": [contexts[0]["id"]],
                 "abstain": False, "usage": {}, "latency_ms": 1}
 
     async def merge(self, notes):
@@ -191,15 +191,19 @@ async def test_agent_flow_documents_retrieval_memory_and_tuning(workspace, monke
         assert calls["merge"] == 1 and merged["memory"]["importance"] == 4
         history = await call(client, "memory_history", memory_id=first["memory"]["id"])
         assert [e["action"] for e in history["events"]] == ["create", "update", "merge"]
-        # Platform memory written directly by the administrator is active at once.
-        platform = await call(client, "memory_add", scope="platform", content="Company style: cite page numbers",
-                              category="instruction")
-        assert platform["memory"]["status"] == "active" and platform["memory"]["user_id"] == "platform"
+        # A second personal memory: there is no shared "platform" namespace any more.
+        standing = await call(client, "memory_add", content="Always cite page numbers", category="instruction")
+        assert standing["memory"]["status"] == "active"
+        assert standing["memory"]["user_id"] == f"user:{users['admin'].id}"
+        # Agents still sending the retired scope argument are served from their own namespace.
+        legacy = await call(client, "memory_add", scope="platform", content="Legacy scope argument is ignored")
+        assert legacy["memory"]["user_id"] == f"user:{users['admin'].id}"
 
         answered = await call(client, "rag_answer", knowledge_base_id=kb_id,
                               question="What does hybrid retrieval fuse?")
-        # Merged personal memory + the standing platform instruction.
-        assert answered["answer"] == "answer with 2 memories" and answered["citations"]
+        # RAG answers never consult memories; those are only for the memory tools.
+        assert answered["answer"] == "grounded answer" and answered["citations"]
+        assert "memories_used" not in answered
 
         async with Session() as db, db.begin():
             dataset = models.Dataset(tenant_id=settings.tenant_id, name="e2e", description="")
@@ -224,7 +228,7 @@ async def test_agent_flow_documents_retrieval_memory_and_tuning(workspace, monke
 
         assert "confirm" in await call_error(client, "memory_clear", confirm=False)
         cleared = await call(client, "memory_clear", confirm=True)
-        assert cleared["deleted"] == 1
+        assert cleared["deleted"] == 3
         assert "must be a positive decimal" in await call_error(client, "document_get", document_id="abc")
 
 
@@ -263,11 +267,6 @@ async def test_employee_permissions_reviews_and_audit_logs(workspace, monkeypatc
         assert own["review_status"] == "approved"
         await ingest_document(int(own["id"]))
         await call(client, "rag_search", knowledge_base_id=personal_kb, query="secret personal question")
-        proposal = await call(client, "memory_add", scope="platform", content="Team uses PostgreSQL 17",
-                              category="fact")
-        assert proposal["action"] == "pending" and proposal["memory"]["status"] == "pending"
-        assert "管理员" in await call_error(client, "memory_update", scope="platform",
-                                            memory_id=proposal["memory"]["id"], content="x")
         mine = await call(client, "memory_add", content="Alice prefers short answers", category="preference")
         assert mine["memory"]["user_id"] == f"user:{alice.id}"
 
@@ -277,10 +276,10 @@ async def test_employee_permissions_reviews_and_audit_logs(workspace, monkeypatc
         assert "资源不存在" in await call_error(client, "document_get", document_id=pending["id"])
         assert personal_kb not in {kb["id"] for kb in (await call(client, "kb_list"))["knowledge_bases"]}
         assert "资源不存在" in await call_error(client, "rag_search", knowledge_base_id=personal_kb, query="x")
-        assert (await call(client, "memory_list", scope="platform", status="pending"))["total"] == 0
+        assert (await call(client, "memory_list"))["total"] == 0
         assert (await call(client, "memory_search", query="short answers"))["results"] == []
-        assert "资源不存在" in await call_error(client, "memory_delete", scope="platform",
-                                              memory_ids=[proposal["memory"]["id"]])
+        assert "记忆不存在" in await call_error(client, "memory_get", memory_id=mine["memory"]["id"])
+        assert "记忆不存在" in await call_error(client, "memory_delete", memory_ids=[mine["memory"]["id"]])
 
         act_as(monkeypatch, admin)
         assert personal_kb not in {kb["id"] for kb in (await call(client, "kb_list"))["knowledge_bases"]}
@@ -288,20 +287,19 @@ async def test_employee_permissions_reviews_and_audit_logs(workspace, monkeypatc
         reviews = await call(client, "review_list")
         assert [d["id"] for d in reviews["documents"]] == [pending["id"]]
         assert reviews["documents"][0]["uploader"] == alice.username
-        assert [m["id"] for m in reviews["memories"]] == [proposal["memory"]["id"]]
+        assert set(reviews) == {"documents"}
         decided = await call(client, "review_decide", kind="document", id=pending["id"], approve=True)
         assert decided["review_status"] == "approved" and decided["status"] == "queued"
         await ingest_document(int(pending["id"]))
-        await call(client, "review_decide", kind="memory", id=proposal["memory"]["id"], approve=True)
-        assert "待审批" in await call_error(client, "review_decide", kind="memory", id=proposal["memory"]["id"],
-                                            approve=False)
 
         act_as(monkeypatch, bob)
         lora = await call(client, "rag_search", knowledge_base_id=platform_kb, query="low rank adaptation",
                           method="vector")
         assert lora["results"][0]["document_id"] == pending["id"]
-        platform_memories = await call(client, "memory_list", scope="platform")
-        assert [m["content"] for m in platform_memories["items"]] == ["Team uses PostgreSQL 17"]
+        assert (await call(client, "memory_list"))["total"] == 0  # alice's memories stay hers
+        act_as(monkeypatch, alice)
+        assert [m["content"] for m in (await call(client, "memory_list"))["items"]] == [
+            "Alice prefers short answers"]
 
     async with Session() as db:
         queries = (await db.scalars(select(models.QueryLog).where(models.QueryLog.tenant_id == settings.tenant_id)

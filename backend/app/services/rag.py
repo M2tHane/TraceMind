@@ -69,7 +69,6 @@ async def answer_question(
     before_model_call: Callable[[], Awaitable[None]] | None = None,
     runtime_settings: Settings | None = None,
     retrieval: RetrievalConfig | dict | None = None,
-    memories: list[str] | None = None,
     cache: RetrievalCache | None = None,
 ) -> dict[str, Any]:
     runtime_settings = runtime_settings if runtime_settings is not None else await resolve_settings()
@@ -101,7 +100,7 @@ async def answer_question(
             answer = await providers.answer(question, supplied,
                                             method=method if method in {*LEGACY_METHODS, "no_context"}
                                             else "hybrid_rerank",
-                                            history=history, memories=memories)
+                                            history=history)
         by_id = {c["id"]: c for c in supplied}
         cited_ids = list(dict.fromkeys(answer["citations"]))
         if any(cid not in by_id for cid in cited_ids):

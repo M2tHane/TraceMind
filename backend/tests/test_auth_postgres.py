@@ -104,20 +104,24 @@ async def test_admin_manages_accounts_and_employee_is_restricted(tenant) -> None
         assert personal.json()["id"] not in admin_view
         assert (await admin_http.get(f"/api/knowledge-bases/{personal.json()['id']}")).status_code == 404
 
-        # Employee platform-memory proposal → admin approval → visible to everyone.
-        proposal = await alice_http.post("/api/memories?scope=platform", json={"content": "Office closes at 6pm"})
-        assert proposal.status_code == 201, proposal.text
-        assert proposal.json()["memory"]["status"] == "pending"
-        assert (await alice_http.patch(f"/api/memories/{proposal.json()['memory']['id']}?scope=platform",
-                                       json={"content": "x"})).status_code == 403
+        # Memories are always private to the caller; a legacy scope query parameter is ignored.
+        created = await alice_http.post("/api/memories?scope=platform", json={"content": "Office closes at 6pm"})
+        assert created.status_code == 201, created.text
+        memory = created.json()["memory"]
+        assert memory["status"] == "active" and memory["user_id"] == f"user:{alice['id']}"
+        for suffix in ("", "?scope=personal", "?scope=platform"):
+            listed = (await alice_http.get(f"/api/memories{suffix}")).json()
+            assert [m["content"] for m in listed["items"]] == ["Office closes at 6pm"]
+            assert (await admin_http.get(f"/api/memories{suffix}")).json()["total"] == 0
+        assert (await alice_http.patch(f"/api/memories/{memory['id']}?scope=platform",
+                                       json={"importance": 5})).status_code == 200
+        assert (await admin_http.get(f"/api/memories/{memory['id']}")).status_code == 404
+        # Admin reviews cover documents only.
         reviews = (await admin_http.get("/api/admin/reviews")).json()
-        assert [m["author"] for m in reviews["memories"]] == ["alice"]
-        decided = await admin_http.post(f"/api/admin/reviews/memories/{proposal.json()['memory']['id']}",
-                                        json={"approve": True})
-        assert decided.status_code == 200 and decided.json()["status"] == "active"
-        shared = (await alice_http.get("/api/memories?scope=platform")).json()
-        assert [m["content"] for m in shared["items"]] == ["Office closes at 6pm"]
-        assert (await admin_http.get("/api/memories")).json()["total"] == 0  # personal memories stay private
+        assert reviews == {"documents": []}
+        assert (await admin_http.get("/api/admin/reviews/count")).json() == {"documents": 0, "total": 0}
+        assert (await admin_http.post(f"/api/admin/reviews/memories/{memory['id']}",
+                                      json={"approve": True})).status_code in (404, 405)
 
         # Disabling an account signs it out immediately.
         assert (await admin_http.patch(f"/api/admin/users/{alice['id']}", json={"status": "disabled"})

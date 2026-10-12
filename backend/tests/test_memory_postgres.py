@@ -173,12 +173,3 @@ async def test_extract_adds_with_dedupe_and_validates_user(tenant):
     with pytest.raises(memory.MemoryError):
         await memory.add_memory("bad user!", "x")
 
-
-async def test_answer_memories_keep_preferences_and_drop_unrelated_facts(tenant):
-    await memory.add_memory("ivy", "Ivy prefers bullet point answers", category="preference", importance=5)
-    await memory.add_memory("ivy", "Ivy adopted a cat named Mochi", category="fact")
-    await memory.add_memory("ivy", "Ivy maintains the PostgreSQL billing schema", category="profile")
-    chosen = await memory.memories_for_answer("ivy", "How is the PostgreSQL billing schema migrated?")
-    assert "Ivy prefers bullet point answers" in chosen
-    assert "Ivy maintains the PostgreSQL billing schema" in chosen
-    assert "Ivy adopted a cat named Mochi" not in chosen

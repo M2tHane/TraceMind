@@ -6,7 +6,7 @@
 
 - **可追踪的召回链路**：范围过滤 → 查询改写 → 向量 / BM25 多路召回 → 加权 RRF 融合 → 重排 → 去重 / MMR / 相邻块扩展，每个阶段记录耗时、参数和候选，问答、评测、MCP 返回的是同一份 trace。
 - **评估与调优闭环**：带页级证据标注的题集，Hit@k / Recall@k / MRR@10 / nDCG@10 排行榜，一键把最优配置设为知识库默认；调优同一任务内复用 Embedding 与重排结果，加候选几乎不加费用。
-- **平台级与个人级**：知识库和长期记忆都分平台（全员可用、管理员维护）与个人（仅本人，管理员也看不到）；员工往平台库上传文档、提交平台记忆都要管理员审批。
+- **平台级与个人级**：知识库分平台（全员可用、管理员维护）与个人（仅本人，管理员也看不到），员工往平台库上传文档要管理员审批；长期记忆只属于本人，供 MCP Agent 使用。
 - **审计**：管理员可查看查询日志（平台库记录问题原文，个人库只记元数据）和 MCP 调用日志（参数只留编号与长度）。
 - **MCP**：Streamable HTTP + stdio，个人访问令牌鉴权，28 个工具覆盖召回、文档上传/更新/删除、记忆增删改查与合并、审批与调优。
 - **界面**：深色侧栏 + 浅色工作区，蓝色只用于操作，青绿色只用于证据（引用、来源、就绪进度）；召回链路按阶段着色并显示耗时占比，文档处理显示五步进度，管理员侧栏显示待审批数量，账户页可一键复制 MCP 客户端配置。
@@ -61,7 +61,7 @@ flowchart LR
   V & B --> F[fusion<br/>加权 RRF]
   F --> R[rerank<br/>可选]
   R --> P[postprocess<br/>阈值 · 去重 · MMR · top_k · 相邻块]
-  P --> G[生成<br/>引用校验 · 记忆个性化]
+  P --> G[生成<br/>引用校验]
   G --> L[查询日志 · retrieval_trace]
 ```
 
@@ -93,10 +93,10 @@ flowchart LR
 
 ### 3. 长期记忆
 
-- 命名空间 `platform` 与 `user:<账号ID>`。向量与记录同存 PostgreSQL（`REAL[]`），精确余弦 + BM25 做 RRF，重要度带 ±10% 权重；Embedding 不可用时按关键词检索，之后可 `reembed`。
+- 每个账号一个命名空间 `user:<账号ID>`，只供本人的 MCP Agent 写入和召回。向量与记录同存 PostgreSQL（`REAL[]`），精确余弦 + BM25 做 RRF，重要度带 ±10% 权重；Embedding 不可用时按关键词检索，之后可 `reembed`。
 - 写入按规范化文本和向量相似度去重（`skip / update / insert`），更新带 `expected_version` 乐观锁，合并生成新记忆并把来源标为 `merged`，每次变更写入 `memory_events` 审计（含前后快照）。
-- 问答时自动带上本人与平台记忆：偏好/指令类常驻，其余按相关度（相似度 ≥ 0.35）选取；记忆用于个性化，从不作为引用。
-- 员工提交的平台记忆是待审批提议，通过后才对所有人生效。
+- 网页问答和 `rag_answer` 不读取记忆；记忆由 Agent 通过 `memory_search` 自行召回并注入提示词。
+- Worker 按间隔检查记忆数量，超过阈值时用对话模型合并相近条目、归档低价值条目，管理员可在“记忆 / 自动整理”查看和手动触发。
 
 ### 4. 权限、审批与审计
 
@@ -123,7 +123,7 @@ flowchart LR
 | ![上传审批](docs/readme/upload-review.png) | ![文档](docs/readme/document.png) |
 | **检索调优排行榜** | **批量评测：BM25 vs 混合重排** |
 | ![调优](docs/readme/tuning.png) | ![评测](docs/readme/evaluation.png) |
-| **我的记忆** | **管理：待审批的文档与平台记忆** |
+| **我的记忆** | **管理：待审批的文档** |
 | ![记忆](docs/readme/memory.png) | ![审批](docs/readme/reviews.png) |
 | **查询日志：个人库不记录问题原文** | **MCP 调用日志** |
 | ![查询日志](docs/readme/query-logs.png) | ![MCP 日志](docs/readme/mcp-logs.png) |
@@ -205,7 +205,6 @@ cd backend && .venv/bin/python ../scripts/seed_demo.py
 | 账号 | 创建账号（系统生成临时密码）、设角色、停用、重置密码；不能停用或降级自己，至少保留一名启用的管理员 | 由管理员分配，首次登录必须改密 |
 | 平台知识库 | 创建、管理、直接上传；审批员工上传 | 可见、可问答检索；上传需审批 |
 | 个人知识库 | 自己的 | 自己的（管理员也看不到） |
-| 平台记忆 | 直接增删改合并；审批员工提议 | 可读并参与个性化；新增为提议 |
 | 个人记忆 | 仅本人 | 仅本人 |
 | 评测、调优、检索对比、环境与模型设置 | 可用 | 不可见 |
 | 查询日志、MCP 调用日志 | 可见 | — |
@@ -277,7 +276,7 @@ pnpm build
 backend/app/api/          REST 接口：auth、admin、library、chat、memory、evaluation、tuning、settings
 backend/app/services/     检索流水线、问答、入库、向量、记忆、评测、调优、鉴权、访问控制、审计
 backend/app/mcp_server.py MCP 工具（挂载于 /mcp，也可 stdio 运行）
-backend/app/worker.py     PostgreSQL 持久任务队列（解析 / 问答 / 评测 / 调优通道）
+backend/app/worker.py     PostgreSQL 持久任务队列（解析 / 问答 / 评测 / 调优 / 记忆整理通道，含定时记忆整理）
 backend/app/cli.py        create-admin、reset-password
 backend/migrations/       Alembic + upgrade/downgrade SQL
 frontend/src/             React 页面：问答、知识库、记忆、评测、管理、账户、设置

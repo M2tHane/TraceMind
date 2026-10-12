@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -177,7 +177,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Iterator[SimpleNamesp
     for name, value in {
         "tenant_id": TENANT, "data_dir": tmp_path, "chat_model": "bootstrap-model",
         "chat_protocol": "openai_chat", "chat_base_url": "https://bootstrap.test/v1", "chat_api_key": "",
-        "embedding_api_key": "", "rerank_api_key": "", "run_worker": False,
+        "embedding_api_key": "", "rerank_api_key": "",
     }.items():
         monkeypatch.setattr(config.settings, name, value)
     db = MockSession()
@@ -470,7 +470,6 @@ async def test_chat_snapshot_reaches_worker_unchanged_after_profile_edit(
     client: httpx.AsyncClient, env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
     protocol: str, explicit: bool,
 ) -> None:
-    monkeypatch.setattr(env.worker, "user_memories", AsyncMock(return_value=None))
     env.default.protocol = protocol
     env.db.add_all([
         env.models.Message(id=901, tenant_id=TENANT, conversation_id=CONVERSATION_ID,

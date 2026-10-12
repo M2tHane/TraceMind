@@ -30,9 +30,14 @@ class Settings(BaseSettings):
     milvus_collection: str = "rag_workbench_chunks_v1"
     model_timeout: float = 120.0
     max_output_tokens: int = 4096
-    run_worker: bool = True
     max_upload_mb: int = 50
     max_kb_chunks: int = 20000
+    memory_consolidation_enabled: bool = True
+    memory_consolidation_interval_minutes: int = 360
+    memory_consolidation_threshold: int = 2000
+    memory_consolidation_target_ratio: float = 0.8
+    memory_consolidation_similarity: float = 0.85
+    memory_consolidation_batch_size: int = 10
     allowed_origins: list[str] = ["http://127.0.0.1:5174", "http://localhost:5174"]
 
 
