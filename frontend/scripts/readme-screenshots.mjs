@@ -28,6 +28,16 @@ async function shot(page, name, { full = false } = {}) {
   console.log('saved', name)
 }
 
+// Signed out: login page.
+{
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, locale: 'zh-CN' })
+  const page = await context.newPage()
+  await page.goto(`${BASE}/`)
+  await page.locator('form[aria-label="登录"]').waitFor()
+  await shot(page, 'login')
+  await context.close()
+}
+
 // Employee 李娜: chat with citations and recall trace, libraries, memory, account.
 {
   const { page, api, context } = await session('lina')

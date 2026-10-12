@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { BookOpen, Brain, FlaskConical, MessageSquare, Settings, ShieldCheck, UserRound } from 'lucide-react'
-import { Empty, ErrorBoundary, Loading } from './components/ui'
+import { BrandMark, Empty, ErrorBoundary, Loading } from './components/ui'
 import { SidebarContext } from './components/SidebarContext'
 import { useApi } from './lib/api'
 import { useAuth } from './lib/auth'
@@ -63,9 +63,11 @@ function Workspace() {
     return () => { media.removeEventListener('change', change); document.removeEventListener('keydown', escape) }
   }, [])
   const items = navItems.filter(item => admin || !item.admin)
+  const reviews = useApi<{ total: number }>('/admin/reviews/count', { enabled: admin, poll: 30000 })
+  const badge = (path: string) => path === '/admin' && reviews.data?.total ? <span className="rail-badge" aria-label={`${reviews.data.total} 项待审批`}>{reviews.data.total}</span> : null
   const link = (item: typeof navItems[number]) => <NavLink key={item.path} to={item.path} title={item.label} onClick={closeOnMobile}
     className={({ isActive }) => `rail-link ${isActive ? 'rail-active' : ''}`}>
-    <item.icon size={19} strokeWidth={1.7} /><span>{item.label}</span>
+    <item.icon size={19} strokeWidth={1.7} /><span>{item.label}</span>{badge(item.path)}
   </NavLink>
   const navigation = items.filter(item => !item.mobileOnly).map(link)
   return <SidebarContext.Provider value={{ sidebarOpen, toggleSidebar: () => setSidebarOpen(open => !open), closeSidebar }}>
@@ -73,7 +75,7 @@ function Workspace() {
       <a className="skip-link" href="#main-content">跳转到主要内容</a>
       {sidebarOpen && <button type="button" className="sidebar-backdrop" aria-label="关闭侧栏" onClick={closeSidebar} />}
       <aside className="app-rail" aria-label="工作区侧栏">
-        <NavLink to="/chat" className="brand" aria-label="TraceMind 首页" onClick={closeOnMobile}><span className="brand-name">TraceMind</span></NavLink>
+        <NavLink to="/chat" className="brand" aria-label="TraceMind 首页" onClick={closeOnMobile}><BrandMark /><span className="brand-name">TraceMind</span></NavLink>
         <nav className="primary-nav" aria-label="主要导航">{navigation}</nav>
         <section className="rail-history" aria-label="对话历史">
           <h2>对话历史</h2>
@@ -84,7 +86,7 @@ function Workspace() {
                 <span>{conversation.title}</span>
               </NavLink>)}</div>}
         </section>
-        <div className="rail-account"><NavLink to="/account" onClick={closeOnMobile} title="我的账户"><span>{user?.display_name || user?.username}</span><small>{admin ? '管理员' : '员工'} · 账户与令牌</small></NavLink></div>
+        <div className="rail-account"><NavLink to="/account" onClick={closeOnMobile} title="我的账户"><span className="rail-avatar" aria-hidden="true">{(user?.display_name || user?.username || '?').slice(0, 1)}</span><span className="rail-account-text"><span>{user?.display_name || user?.username}</span><small>{admin ? '管理员' : '员工'} · 账户与令牌</small></span></NavLink></div>
       </aside>
       <nav className="mobile-nav" aria-label="移动导航">{items.map(link)}</nav>
       <main id="main-content" className="main-content"><ErrorBoundary><Suspense fallback={<Loading label="正在打开工作区…" />}><Routes>

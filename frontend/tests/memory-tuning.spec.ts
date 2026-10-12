@@ -26,6 +26,7 @@ async function mockApi(page: Page): Promise<string[]> {
     const url = new URL(request.url())
     const path = url.pathname
     if (path === '/api/auth/me') return route.fulfill({ json: ADMIN_ACCOUNT })
+    if (path === '/api/admin/reviews/count') return route.fulfill({ json: { total: 0 } })
     if (request.method() !== 'GET') {
       writes.push(`${request.method()} ${path}`)
       if (path === '/api/debug') return route.fulfill({ json: { results: [{ method: 'custom', answer: '', citations: [], contexts: [], abstain: false, timing: { retrieval_ms: 203 }, usage: {}, trace, queries: ['q'], retrieval_config: config }] } })

@@ -33,6 +33,7 @@ async function mockChat(page: Page, status: 'completed' | 'processing' | 'failed
     const request = route.request()
     const path = new URL(request.url()).pathname
     if (path === '/api/auth/me') return route.fulfill({ json: ADMIN_ACCOUNT })
+    if (path === '/api/admin/reviews/count') return route.fulfill({ json: { total: 0 } })
     if (request.method() !== 'GET') { writes.push(path); return route.fulfill({ status: 400, json: { detail: 'No writes expected' } }) }
     if (path === '/api/model-profiles') return route.fulfill({ json: [profile] })
     if (path === '/api/knowledge-bases') return route.fulfill({ json: [{ id: 'kb-1', name: '入门演示', ready_count: 1, document_count: 1, chunk_count: 2 }] })

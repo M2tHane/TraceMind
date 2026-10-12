@@ -25,13 +25,14 @@ export function RecallTrace({ stages, queries }: { stages: TraceStage[]; queries
   return <div className="trace">
     <div className="trace-header"><span>召回链路</span><span>{stages.length} 个阶段 · {formatNumber(total)} ms</span></div>
     {queries && queries.length > 1 && <p className="trace-queries">查询：{queries.map(q => <span key={q} className="file-tag">{q}</span>)}</p>}
-    <ol className="trace-list">{stages.map((stage, index) => <li key={`${stage.stage}-${index}`} className="trace-stage">
+    <ol className="trace-list">{stages.map((stage, index) => <li key={`${stage.stage}-${index}`} className="trace-stage" data-stage={stage.stage.split('.')[0] === 'recall' ? stage.stage.replace('.', '-') : stage.stage}>
       <div className="trace-stage-head">
         <span className="trace-index">{index + 1}</span>
         <strong>{STAGE_LABELS[stage.stage] ?? stage.stage}</strong>
         {stage.count !== undefined && <span className="count-badge">{stage.count}</span>}
         <span className="trace-ms">{formatNumber(stage.ms)} ms</span>
       </div>
+      {total > 0 && <span className="trace-time" aria-hidden="true"><span style={{ width: `${Math.max(1.5, (stage.ms || 0) / total * 100)}%` }} /></span>}
       {typeof stage.query === 'string' && <p className="trace-detail">查询：{stage.query}</p>}
       {detailText(stage) && <p className="trace-detail">{detailText(stage)}</p>}
       {!!stage.candidates?.length && <details className="trace-candidates"><summary>前 {stage.candidates.length} 个候选</summary>

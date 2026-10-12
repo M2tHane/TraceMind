@@ -55,7 +55,7 @@ function MemoryCard({ memory, canEdit, selected, onSelect, onEdit, onHistory, on
       <p className="text-sm leading-6 break-words">{memory.content}</p>
       <div className="memory-card-meta">
         {['pending', 'rejected'].includes(memory.status) && <Status value={memory.status} />}
-        <span className="file-tag">{memoryCategoryLabel(memory.category)}</span>
+        <span className="memory-chip" data-category={memory.category}>{memoryCategoryLabel(memory.category)}</span>
         {memory.tags.map(tag => <span key={tag} className="file-tag">#{tag}</span>)}
         <span className="importance" title={`重要度 ${memory.importance}`}>{'★'.repeat(memory.importance)}{'☆'.repeat(5 - memory.importance)}</span>
         <span>v{memory.version}</span><span>命中 {memory.access_count}</span><span>{memory.source}</span><span>{formatDate(memory.updated_at)}</span>

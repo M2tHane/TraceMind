@@ -28,6 +28,7 @@ async function mockApi(page: Page) {
     const path = new URL(request.url()).pathname.replace('/api', '')
     const method = request.method()
     if (path === '/auth/me') return route.fulfill({ json: ADMIN_ACCOUNT })
+    if (path === '/admin/reviews/count') return route.fulfill({ json: { total: 0 } })
     const body = request.postData() ? request.postDataJSON() as Record<string, unknown> : {}
     calls.push({ method, path, body })
     const fulfill = (json: unknown, status = 200) => route.fulfill({ status, json })

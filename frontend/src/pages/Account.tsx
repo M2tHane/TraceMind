@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Copy, KeyRound, LogOut, Plus, Trash2 } from 'lucide-react'
+
+const mcpConfig = (endpoint: string, token: string): string => JSON.stringify({ mcpServers: { tracemind: { type: 'http', url: endpoint, headers: { Authorization: `Bearer ${token}` } } } }, null, 2)
+const copy = (text: string, message = '已复制'): void => { void navigator.clipboard.writeText(text).then(() => toast.success(message), () => toast.error('复制失败，请手动选择文本')) }
 import { toast } from 'sonner'
 import { errorText, formatDate, post, remove, useAction, useApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import type { ApiToken } from '../lib/types'
-import { Button, Empty, ErrorState, Field, Loading, Modal, Notice, PageHeader, Status } from '../components/ui'
+import { BrandMark, Button, Empty, ErrorState, Field, Loading, Modal, Notice, PageHeader, Status } from '../components/ui'
 
 export function LoginPage() {
   const { signIn } = useAuth()
@@ -16,14 +19,28 @@ export function LoginPage() {
     setBusy(true); setError('')
     try { await signIn(String(form.get('username')).trim(), String(form.get('password'))) } catch (failure) { setError(errorText(failure)) } finally { setBusy(false) }
   }
-  return <main className="auth-screen"><form className="auth-card" onSubmit={event => { void submit(event) }} aria-label="登录">
-    <div><h1>TraceMind</h1><p>使用管理员分配的账号登录。</p></div>
+  return <main className="auth-split">
+    <section className="auth-story" aria-label="产品简介">
+      <div className="brand"><BrandMark size={32} /><span className="brand-name">TraceMind</span></div>
+      <div>
+        <h2>每个回答，都能追溯到原文。</h2>
+        <p>企业知识库问答工作台：混合检索、重排与引用溯源，配合个人记忆和 MCP，让团队和 Agent 用同一套知识。</p>
+        <ol className="auth-thread">
+          <li><span /><div><strong>上传文档</strong><small>PDF 与 Markdown 自动解析、分块、建立索引</small></div></li>
+          <li><span /><div><strong>混合召回与重排</strong><small>向量 + BM25 融合，每一步耗时与候选都可查看</small></div></li>
+          <li><span /><div><strong>带引用的回答</strong><small>点击引用即可跳到原文段落</small></div></li>
+        </ol>
+      </div>
+      <small>账号由管理员分配。</small>
+    </section>
+    <div className="auth-form-side"><form className="auth-card" onSubmit={event => { void submit(event) }} aria-label="登录">
+    <div><h1>登录</h1><p>使用管理员分配的账号登录 TraceMind。</p></div>
     <Field label="用户名"><input name="username" autoComplete="username" required maxLength={64} autoFocus /></Field>
     <Field label="密码"><input name="password" type="password" autoComplete="current-password" required maxLength={128} /></Field>
     {error && <p className="auth-error" role="alert">{error}</p>}
     <Button type="submit" busy={busy}>登录</Button>
     <p className="auth-footnote">没有账号或忘记密码？请联系管理员。</p>
-  </form></main>
+  </form></div></main>
 }
 
 function PasswordForm({ onDone, submitLabel = '修改密码' }: { onDone?: () => void; submitLabel?: string }) {
@@ -70,10 +87,11 @@ export function AccountPage() {
       <section className="panel"><div className="panel-heading"><h2>修改密码</h2></div><PasswordForm /></section>
       <section className="panel"><div className="panel-heading"><h2>MCP 访问令牌</h2><Button className="ml-auto" variant="secondary" onClick={() => setOpen(true)}><Plus size={15} />新建令牌</Button></div>
         <p className="text-sm text-slate-500 leading-6 mb-4">Agent 以你的身份调用 MCP，权限与你在网页中相同，所有调用都会记录在管理员的 MCP 日志中。端点：<code>{endpoint}</code>，请求头 <code>Authorization: Bearer &lt;令牌&gt;</code>。</p>
-        {tokens.isPending ? <Loading /> : tokens.isError ? <ErrorState error={tokens.error} retry={() => { void tokens.refetch() }} /> : !tokens.data.length ? <Empty title="还没有令牌" description="新建一个令牌并配置到 Agent 的 MCP 客户端。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>状态</th><th>最近使用</th><th>到期</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{tokens.data.map(token => <tr key={token.id}><td><span className="font-medium">{token.name}</span>{token.prefix && <code className="ml-2 text-xs text-slate-500">{token.prefix}…</code>}</td><td><Status value={token.revoked_at ? 'disabled' : 'active'} /></td><td className="whitespace-nowrap">{formatDate(token.last_used_at ?? undefined)}</td><td className="whitespace-nowrap">{token.expires_at ? formatDate(token.expires_at) : '永不过期'}</td><td>{!token.revoked_at && <button type="button" className="text-slate-400 hover:text-red-700" aria-label={`吊销 ${token.name}`} title="吊销令牌" disabled={revoke.isPending} onClick={() => { if (window.confirm(`吊销「${token.name}」？使用它的 Agent 将立即失去访问权限。`)) revoke.mutate(token.id) }}><Trash2 size={15} /></button>}</td></tr>)}</tbody></table></div>}
+        {tokens.isPending ? <Loading /> : tokens.isError ? <ErrorState error={tokens.error} retry={() => { void tokens.refetch() }} /> : !tokens.data.length ? <Empty icon={KeyRound} title="还没有令牌" description="新建一个令牌，再把下面的配置粘贴到 Agent 的 MCP 客户端。" action={<Button variant="secondary" onClick={() => setOpen(true)}><Plus size={15} />新建令牌</Button>} /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>状态</th><th>最近使用</th><th>到期</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{tokens.data.map(token => <tr key={token.id}><td><span className="font-medium">{token.name}</span>{token.prefix && <code className="ml-2 text-xs text-slate-500">{token.prefix}…</code>}</td><td><Status value={token.revoked_at ? 'disabled' : 'active'} /></td><td className="whitespace-nowrap">{formatDate(token.last_used_at ?? undefined)}</td><td className="whitespace-nowrap">{token.expires_at ? formatDate(token.expires_at) : '永不过期'}</td><td>{!token.revoked_at && <button type="button" className="text-slate-400 hover:text-red-700" aria-label={`吊销 ${token.name}`} title="吊销令牌" disabled={revoke.isPending} onClick={() => { if (window.confirm(`吊销「${token.name}」？使用它的 Agent 将立即失去访问权限。`)) revoke.mutate(token.id) }}><Trash2 size={15} /></button>}</td></tr>)}</tbody></table></div>}
+        <div className="mcp-config"><div className="mcp-config-head"><span>MCP 客户端配置（Claude Desktop、Cursor 等）</span><Button variant="secondary" onClick={() => copy(mcpConfig(endpoint, '<令牌>'))}><Copy size={13} />复制</Button></div><pre>{mcpConfig(endpoint, '<令牌>')}</pre></div>
       </section>
     </div>
     <Modal open={open} onOpenChange={value => { if (!create.isPending) setOpen(value) }} title="新建 MCP 令牌"><form className="dialog-body space-y-5" onSubmit={submit}><Field label="名称"><input name="name" required maxLength={100} placeholder="例如：Claude Desktop" autoFocus /></Field><Field label="有效期（天）" hint="留空表示永不过期"><input name="expires_days" type="number" min={1} max={3650} placeholder="90" /></Field>{create.error && <ErrorState error={create.error} />}<div className="dialog-actions"><Button variant="secondary" onClick={() => setOpen(false)} disabled={create.isPending}>取消</Button><Button type="submit" busy={create.isPending}>创建</Button></div></form></Modal>
-    <Modal open={created !== null} onOpenChange={value => { if (!value) setCreated(null) }} title="令牌已创建" description="令牌只显示这一次，关闭后无法再次查看。"><div className="dialog-body space-y-4"><Notice>请立即复制并妥善保存，不要提交到代码仓库。</Notice><code className="secret-box" data-testid="new-token">{created?.token}</code><div className="dialog-actions"><Button variant="secondary" onClick={() => { void navigator.clipboard.writeText(created?.token ?? '').then(() => toast.success('已复制')) }}><Copy size={15} />复制</Button><Button onClick={() => setCreated(null)}>我已保存</Button></div></div></Modal>
+    <Modal open={created !== null} onOpenChange={value => { if (!value) setCreated(null) }} title="令牌已创建" description="令牌只显示这一次，关闭后无法再次查看。"><div className="dialog-body space-y-4"><Notice>请立即复制并妥善保存，不要提交到代码仓库。</Notice><code className="secret-box" data-testid="new-token">{created?.token}</code><div className="dialog-actions"><Button variant="secondary" onClick={() => copy(mcpConfig(endpoint, created?.token ?? ''), '已复制含令牌的 MCP 配置')}><Copy size={15} />复制 MCP 配置</Button><Button variant="secondary" onClick={() => copy(created?.token ?? '')}><Copy size={15} />复制令牌</Button><Button onClick={() => setCreated(null)}>我已保存</Button></div></div></Modal>
   </div>
 }
