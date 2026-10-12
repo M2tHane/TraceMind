@@ -55,7 +55,7 @@ claude mcp add --transport http tracemind http://127.0.0.1:8010/mcp --header "Au
 | `kb_create` | 新建知识库；`scope="personal"`（默认）或 `"platform"`（仅管理员） |
 | `kb_set_retrieval_config` | 设置或清除知识库默认检索流水线（需管理权限） |
 | `rag_search` | 只召回不生成；返回片段、分数和逐阶段 trace |
-| `rag_answer` | 带引用校验的问答，只依据召回的知识库材料，不读取记忆 |
+| `rag_answer` | 带引用校验的问答，只依据召回的知识库材料，不读取记忆。`answer` 中句子后的 `[^n]` 对应 `citations` 里 `rank = n` 的来源 |
 
 `rag_search` 的 `method`：`auto`（知识库调优后的默认配置，否则 `hybrid_rerank`）、`bm25`、`vector`、`hybrid`、`hybrid_rerank`；`retrieval` 传完整配置可覆盖；`document_ids` 限定文档范围。
 

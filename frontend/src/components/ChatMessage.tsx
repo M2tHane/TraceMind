@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { Citation, Message } from '../lib/types'
 import { formatNumber } from '../lib/api'
 import { formatMs } from '../lib/trace'
+import { markedCitations, stripMarkers } from '../lib/citeMarkers'
 import { Markdown } from './sources'
 import { BrandMark, CiteMarker, ErrorState } from './ui'
 
@@ -37,9 +38,16 @@ export function ChatMessage({ message, initial = '我', evidence }: { message: M
   const [copied, setCopied] = useState(false)
   const assistant = message.role === 'assistant'
   const citations = distinctCitations(message.citations ?? [])
+  // Citations the model placed after a sentence render inline; the rest stay at the end of the answer.
+  const placed = markedCitations(message.content)
+  const unplaced = citations.map((citation, index) => ({ citation, index })).filter(({ index }) => !placed.has(index + 1))
+  const citeLabel = (index: number) => {
+    const citation = citations[index]
+    return citation ? `引用 ${index + 1}：${citation.filename}${citation.page ? ` 第 ${citation.page} 页` : ''}` : `引用 ${index + 1}`
+  }
   async function copyAnswer(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(message.content)
+      await navigator.clipboard.writeText(stripMarkers(message.content))
       setCopied(true)
       toast.success('回答已复制')
     } catch {
@@ -59,10 +67,13 @@ export function ChatMessage({ message, initial = '我', evidence }: { message: M
       {pending ? <Pending message={message} />
         : message.status === 'failed' ? <ErrorState error={new Error(message.error || '生成失败，请检查服务配置后重新提问。')} />
           : message.content && <div className="assistant-bubble">
-            <Markdown text={message.content} />
-            {citations.length > 0 && <p className="answer-cites">{citations.map((citation, index) =>
+            <Markdown text={message.content} cite={{
+              active: evidence?.active ? evidence.citation + 1 : undefined, label: n => citeLabel(n - 1),
+              onCite: evidence ? n => { if (citations[n - 1]) evidence.onCite(n - 1) } : undefined,
+            }} />
+            {unplaced.length > 0 && <p className="answer-cites">{unplaced.map(({ citation, index }) =>
               <CiteMarker key={`${citation.document_id}:${citation.id}`} n={index + 1} active={!!evidence?.active && evidence.citation === index}
-                label={`引用 ${index + 1}：${citation.filename}${citation.page ? ` 第 ${citation.page} 页` : ''}`} onClick={evidence ? () => evidence.onCite(index) : undefined} />)}</p>}
+                label={citeLabel(index)} onClick={evidence ? () => evidence.onCite(index) : undefined} />)}</p>}
           </div>}
       {message.status === 'completed' && <div className="message-support">
         <MessageTime value={message.created_at} />

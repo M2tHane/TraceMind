@@ -17,6 +17,8 @@ from html import unescape
 from pathlib import PurePosixPath
 from typing import Any
 
+from app.services.citations import strip_markers
+
 _TOKEN_RE = re.compile(
     r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[-+]?\d+)?|[a-z]+|"
     r"[㐀-䶿一-鿿豈-﫿\U00020000-\U000323af]"
@@ -52,6 +54,7 @@ def answer_metrics(prediction: str, reference_answer: str) -> dict[str, Any]:
     """Only emit answer scores when a nonblank reference was supplied."""
     if not reference_answer.strip():
         return {}
+    prediction = strip_markers(prediction)
     return {"exact_match": exact_match(prediction, reference_answer),
             "token_f1": token_f1(prediction, reference_answer), "answer_metric_label": "lexical_proxy"}
 

@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 import httpx
 from loguru import logger
 
+from app.services.citations import MarkerError, place_markers, strip_markers
+
 
 class ProviderSettings(Protocol):
     """Structural configuration interface; no global settings dependency."""
@@ -404,7 +406,12 @@ class Providers:
             if method == "no_context" else
             "Answer only using the current sources. If they do not support the answer, abstain. "
             "Cite only source IDs from the current sources, never a previous conversation. "
-            "A non-abstaining answer must have at least one citation."
+            "A non-abstaining answer must have at least one citation. "
+            "Mark where each source is used: in the answer text, write [[<source id>]] right after every "
+            "sentence or clause that a source supports, e.g. "
+            '"answer": "LoRA freezes the base weights [[123]]. It trains two low-rank matrices [[123]][[456]]." '
+            "with citations [\"123\", \"456\"]. Every cited ID must appear as such a marker in the answer; "
+            "an abstention has no markers."
         )
         system = (
             "You are a careful question-answering assistant. " + grounding + " "
@@ -432,9 +439,16 @@ class Providers:
             raise _failure("Chat model cited a source outside the supplied contexts")
         if result["abstain"] and result["citations"]:
             raise _failure("Chat model returned citations for an abstention")
-        if method != "no_context" and not result["abstain"] and not result["citations"]:
+        if result["abstain"] or method == "no_context":
+            answer, citations = strip_markers(result["answer"]).strip(), list(dict.fromkeys(result["citations"]))
+        else:
+            try:
+                answer, citations = place_markers(result["answer"], result["citations"], allowed_ids)
+            except MarkerError as error:
+                raise _failure(str(error)) from None
+        if method != "no_context" and not result["abstain"] and not citations:
             raise _failure("Chat model returned an unsupported answer without citations")
-        return {**result, "citations": list(dict.fromkeys(result["citations"])),
+        return {**result, "answer": answer or result["answer"], "citations": citations,
                 "usage": usage, "latency_ms": latency}
 
     async def judge(

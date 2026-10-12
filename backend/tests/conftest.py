@@ -7,7 +7,6 @@ import pytest
 
 from app.services import audit
 
-
 # Fixtures that run a test in a throwaway tenant and delete it afterwards.
 ISOLATED_TENANT_FIXTURES = {"tenant", "workspace", "world"}
 

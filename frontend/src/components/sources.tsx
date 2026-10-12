@@ -8,6 +8,7 @@ import { methodLabel, type Citation, type RagResult, type RetrievalConfig, type 
 import { formatNumber } from '../lib/api'
 import type { PublicModelSnapshot } from '../lib/configuration'
 import { formatMs } from '../lib/trace'
+import { remarkCiteMarkers } from '../lib/citeMarkers'
 import { CiteMarker, Drawer, Empty, Notice, Tag } from './ui'
 import { PdfCanvas } from './PdfCanvas'
 import { RecallTrace, retrievalSummary } from './Retrieval'
@@ -23,8 +24,25 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   return <div className="code-block"><div className="code-block-head"><span>{language}</span><button type="button" onClick={copy} aria-label={copied ? '代码已复制' : '复制代码'}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</button></div><pre ref={ref}>{children}</pre></div>
 }
 
-export function Markdown({ text }: { text: string }) {
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false }]]} skipHtml components={{ pre: CodeBlock, a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span className="tm-faint">[图片：{alt || '文档图片'}]</span> }}>{text}</ReactMarkdown></div>
+/** Inline citation markers inside an answer: which one is active and what clicking one does. */
+export interface CiteOptions { active?: number; onCite?: (n: number) => void; label?: (n: number) => string }
+
+export function Markdown({ text, cite }: { text: string; cite?: CiteOptions }) {
+  const plugins = cite ? [remarkGfm, remarkCiteMarkers] : [remarkGfm]
+  return <div className="markdown"><ReactMarkdown remarkPlugins={plugins} rehypePlugins={[[rehypeHighlight, { detect: false }]]} skipHtml components={{
+    pre: CodeBlock, a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+    img: ({ alt }) => <span className="tm-faint">[图片：{alt || '文档图片'}]</span>,
+    sup: ({ node: _node, children, ...props }) => {
+      const n = Number((props as Record<string, unknown>)['data-cite'])
+      if (!cite || !n) return <sup>{children}</sup>
+      return <CiteMarker n={n} active={cite.active === n} label={cite.label?.(n)} onClick={cite.onCite ? () => cite.onCite!(n) : undefined} />
+    },
+    span: ({ node: _node, children, ...props }) => {
+      const numbers = String((props as Record<string, unknown>)['data-cite-span'] ?? '').split(' ').map(Number)
+      if (!cite || !numbers[0]) return <span>{children}</span>
+      return <span className="answer-claim" data-active={cite.active !== undefined && numbers.includes(cite.active) || undefined}>{children}</span>
+    },
+  }}>{text}</ReactMarkdown></div>
 }
 export function PdfViewer({ documentId, page, filename }: { documentId: string; page?: number | null; filename: string }) {
   if (!filename.toLowerCase().endsWith('.pdf')) return <TextSource documentId={documentId} markdown={/\.(md|markdown)$/i.test(filename)} />
@@ -107,7 +125,7 @@ export function ResultView({ result, retrievalOnly = false }: { result: RagResul
   return <div className="space-y-3">
     {result.error && <Notice>{result.error}</Notice>}
     {result.abstain && <Tag tone="warn">依据不足</Tag>}
-    {result.answer ? <Markdown text={result.answer} /> : !retrievalOnly && !result.error ? <Empty title="未返回回答" /> : null}
+    {result.answer ? <Markdown text={result.answer} cite={{}} /> : !retrievalOnly && !result.error ? <Empty title="未返回回答" /> : null}
     {retrievalOnly ? <CitationList citations={result.contexts ?? []} label="召回上下文" defaultOpen /> : <CitationList citations={result.citations ?? []} />}
     <DebugInfo method={result.method} timing={result.timing} usage={result.usage} contexts={result.contexts} trace={result.trace} queries={result.queries} config={result.retrieval_config} />
   </div>

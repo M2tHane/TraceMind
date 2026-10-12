@@ -21,7 +21,7 @@ const trace = {
 const common = { conversation_id: 'chat-1', status: 'completed', stage: 'completed', method: 'hybrid_rerank', created_at: createdAt, citations: [], contexts: [], timing: {}, usage: {} }
 const messages = [
   { ...common, id: 'm1', role: 'user', content: '年假和病假怎么请？' },
-  { ...common, id: 'm2', role: 'assistant', content: '年假按入职年限计算；病假需提交医院证明。', citations: [first, second], contexts: [first, second, uncited], retrieval_trace: trace, model_snapshot: profile, timing: { retrieval_ms: 133, generation_ms: 900 } },
+  { ...common, id: 'm2', role: 'assistant', content: '年假按入职年限计算[^1]；病假需提交医院证明[^2]。', citations: [first, second], contexts: [first, second, uncited], retrieval_trace: trace, model_snapshot: profile, timing: { retrieval_ms: 133, generation_ms: 900 } },
 ]
 
 async function mockChat(page: Page) {
@@ -125,8 +125,13 @@ test('answer citation markers select the matching evidence card and back', async
   await expect(pane.getByRole('tab')).toHaveText([/^引用/, '召回链路'])
   await expect(pane.getByRole('region', { name: '召回但未引用' })).toContainText('加班调休')
 
+  // Markers sit after the sentence they support, not in a row at the end of the answer.
+  await expect(page.locator('.assistant-bubble .markdown .tm-cite')).toHaveCount(2)
+  await expect(page.locator('.answer-cites')).toHaveCount(0)
+  await expect(page.locator('.assistant-bubble')).not.toContainText('[^')
   const marker2 = page.getByRole('button', { name: '引用 2：handbook.docx 第 7 页' })
   await marker2.click()
+  await expect(page.locator('.answer-claim[data-active]')).toHaveText('病假需提交医院证明')
   await expect(marker2).toHaveAttribute('aria-pressed', 'true')
   await expect(cards.nth(1)).toHaveAttribute('aria-current', 'true')
   await expect(cards.nth(0)).not.toHaveAttribute('aria-current', 'true')
@@ -136,6 +141,7 @@ test('answer citation markers select the matching evidence card and back', async
   await pane.getByRole('button', { name: '选中引用 1' }).click()
   await expect(cards.nth(0)).toHaveAttribute('aria-current', 'true')
   await expect(page.getByRole('button', { name: '引用 1：leave-policy.pdf 第 3 页' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.answer-claim[data-active]')).toHaveText('年假按入职年限计算')
   await expect(marker2).toHaveAttribute('aria-pressed', 'false')
 
   // The marker opens the citations tab even from the recall chain.
@@ -143,5 +149,16 @@ test('answer citation markers select the matching evidence card and back', async
   await marker2.click()
   await expect(pane.getByRole('tab', { name: /引用/ })).toHaveAttribute('aria-selected', 'true')
   await expect(cards.nth(1)).toHaveAttribute('aria-current', 'true')
+  expect(unexpected).toEqual([])
+})
+
+test('copying an answer drops the inline citation markers', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { document.documentElement.dataset.copiedText = text } } })
+  })
+  const unexpected = await mockChat(page)
+  await page.goto('/chat/chat-1')
+  await page.getByRole('button', { name: '复制回答', exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-copied-text', '年假按入职年限计算；病假需提交医院证明。')
   expect(unexpected).toEqual([])
 })

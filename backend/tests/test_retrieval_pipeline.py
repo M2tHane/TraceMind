@@ -206,3 +206,53 @@ def test_ndcg_never_exceeds_one_when_one_chunk_quotes_several_labels() -> None:
     metrics = ranking_metrics([chunk], labels)
     assert metrics["recall_at_5"] == 1.0 and metrics["mrr_at_10"] == 1.0
     assert 0 < metrics["ndcg_at_10"] <= 1.0
+
+
+def test_inline_markers_are_renumbered_in_citation_order() -> None:
+    from app.services.citations import MarkerError, place_markers, strip_markers
+    text, order = place_markers("RAG retrieves first [[b]]. Then it generates [[a]] [[a]][[b]].", ["a", "c"],
+                                {"a", "b", "c"})
+    # First marker decides the number; cited-but-unmarked sources follow.
+    assert order == ["b", "a", "c"]
+    assert text == "RAG retrieves first [^1]. Then it generates [^2][^1]."
+    assert strip_markers(text) == "RAG retrieves first. Then it generates."
+    with pytest.raises(MarkerError):
+        place_markers("Made up [[zzz]].", ["a"], {"a"})
+
+
+def _answering(reply: dict):
+    import asyncio
+
+    from app.services.providers import Providers
+
+    async def complete(messages):
+        return reply, {}, 1.0
+
+    providers = Providers(SimpleNamespace(model_timeout=5, chat_api_key="", embedding_api_key="", rerank_api_key=""))
+    providers._complete = complete
+
+    async def run(method="hybrid_rerank"):
+        try:
+            return await providers.answer("q", CHUNKS[:2], method=method)
+        finally:
+            await providers.close()
+    return asyncio.run(run())
+
+
+def test_generated_answer_carries_sentence_markers() -> None:
+    from app.services.providers import ProviderError
+    result = _answering({"answer": "Search then generate [[a]]. Adapters are low rank [[b]].",
+                         "citations": ["a", "b"], "abstain": False})
+    assert result["answer"] == "Search then generate [^1]. Adapters are low rank [^2]."
+    assert result["citations"] == ["a", "b"]
+    # Markers alone count as citations; a marker outside the sources rejects the answer.
+    assert _answering({"answer": "Only marked [[b]].", "citations": [], "abstain": False})["citations"] == ["b"]
+    with pytest.raises(ProviderError):
+        _answering({"answer": "Invented [[x]].", "citations": ["a"], "abstain": False})
+    # Abstentions and no-context answers never keep markers.
+    assert _answering({"answer": "Not supported [[a]].", "citations": [], "abstain": True})["answer"] == "Not supported."
+
+
+def test_answer_metrics_ignore_citation_markers() -> None:
+    from app.services.metrics import answer_metrics
+    assert answer_metrics("Paris [^1].", "Paris.")["exact_match"] == answer_metrics("Paris.", "Paris.")["exact_match"]

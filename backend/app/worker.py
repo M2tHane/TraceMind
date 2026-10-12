@@ -40,6 +40,7 @@ async def _log_chat(params: dict, kb_id: int, started: float, result_count: int 
 
 
 async def answer_message(message_id: int, params: dict) -> None:
+    from app.services.citations import strip_markers
     from app.services.rag import answer_question
     async with Session() as db:
         message = await owned(db, Message, message_id)
@@ -50,7 +51,7 @@ async def answer_message(message_id: int, params: dict) -> None:
             Message.conversation_id == conversation.id, Message.id < message.id,
             Message.status == "completed").order_by(Message.id.desc()).limit(7))).all()
         # Current user question is already supplied separately.
-        history_rows = [{"role": m.role, "content": m.content} for m in reversed(history)
+        history_rows = [{"role": m.role, "content": strip_markers(m.content)} for m in reversed(history)
                         if m.content != params["question"]]
         message.status, message.stage = "processing", "retrieving"
         await db.commit()
