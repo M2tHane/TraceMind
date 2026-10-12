@@ -1,0 +1,32 @@
+/* Admin: approvals, accounts, audit logs. */
+.ad-panel { overflow: hidden; }
+.ad-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ad-search-form { display: contents; }
+.ad-search { width: 260px; max-width: 100%; }
+.ad-form { display: flex; flex-direction: column; gap: 14px; }
+.ad-secret {
+  display: block; padding: 10px 12px; border: 1px solid var(--tm-line); border-radius: 4px; background: var(--tm-surface-3);
+  font-size: 13px; overflow-wrap: anywhere; user-select: all;
+}
+
+/* Drawer content */
+.ad-subtitle { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.ad-preview { border: 1px solid var(--tm-line); border-radius: 4px; background: var(--tm-surface-2); padding: 14px 16px; overflow-wrap: anywhere; }
+.ad-plain { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.75; }
+.ad-preview-pdf { border: 1px solid var(--tm-line); border-radius: 4px; overflow: hidden; }
+.ad-foot-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ad-result { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 4px; }
+.ad-result .tm-tag { background: rgba(255, 255, 255, .7); }
+.ad-result-approved { background: var(--tm-tag-ok-bg); }
+.ad-result-rejected { background: var(--tm-tag-err-bg); }
+
+/* Tables */
+.ad-clip { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.ad-err { color: var(--tm-danger); }
+.ad-ok { color: var(--tm-text-3); }
+.ad-muted { color: var(--tm-faint); }
+.ad-italic { font-style: italic; }
+.ad-wrap { white-space: normal; max-width: 260px; }
+.ad-question { min-width: 260px; max-width: 460px; overflow-wrap: anywhere; }
+.ad-args { display: flex; flex-wrap: wrap; gap: 2px 14px; font-family: var(--tm-mono); font-size: 12px; }
+.ad-arg { white-space: nowrap; }

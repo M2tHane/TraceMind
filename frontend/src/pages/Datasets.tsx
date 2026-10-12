@@ -1,22 +1,64 @@
-import { EvalNav } from '../components/EvalNav'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowUpRight, Download, FileJson, Pencil, Plus, Search, Upload } from 'lucide-react'
+import { Download, Plus, Search, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { Select } from '../components/Select'
 import { api, formatDate, post, useAction, useApi } from '../lib/api'
 import type { Dataset, Evidence, Question, QuestionFields } from '../lib/types'
-import { Button, Empty, ErrorState, Field, JsonDetails, Loading, Modal, Notice, PageHeader, Status } from '../components/ui'
+import { Button, DataTable, Drawer, Empty, ErrorState, FactStrip, JsonDetails, Loading, Pager, Segmented, StatusTag, Tag, type Column } from '../components/ui'
+import { Page } from '../components/shell/Shell'
+import { EvaluationSide } from '../components/shell/ModuleNav'
+import { FormField, MenuPopover } from './evalShared'
+
+function NewDatasetDrawer({ pending, error, onSubmit, onClose }: { pending: boolean; error: Error | null; onSubmit: (body: { name: string; description: string }) => void; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  return <Drawer open onOpenChange={open => { if (!open && !pending) onClose() }} title="新建题集" width={480}
+    footer={<div className="ev-actions"><Button variant="secondary" disabled={pending} onClick={onClose}>取消</Button><Button type="submit" form="dataset-form" busy={pending} disabled={!name.trim()}>创建题集</Button></div>}>
+    <form id="dataset-form" className="ev-form ev-form-flush" onSubmit={event => { event.preventDefault(); if (!pending) onSubmit({ name: name.trim(), description: description.trim() }) }}>
+      <FormField label="题集名称"><input className="tm-input" required maxLength={200} placeholder="例如：论文问答基准 v1" value={name} onChange={event => setName(event.target.value)} autoFocus /></FormField>
+      <FormField label="描述（可选）"><textarea className="tm-input" rows={3} value={description} onChange={event => setDescription(event.target.value)} /></FormField>
+      {error && <ErrorState error={error} />}
+    </form>
+  </Drawer>
+}
 
 export function DatasetsPage() {
   const query = useApi<Dataset[]>('/datasets')
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const navigate = useNavigate()
-  const create = useAction((body: { name: string; description: string }) => post<Dataset>('/datasets', body), { invalidate: ['/datasets'], success: '数据集已创建', onSuccess: dataset => { setOpen(false); navigate(`/evaluation/datasets/${dataset.id}`) } })
-  const example = useAction(() => post<Dataset>('/datasets/import-example'), { invalidate: ['/datasets'], success: '示例数据集已就绪，请另行上传对应 PDF', onSuccess: dataset => navigate(`/evaluation/datasets/${dataset.id}`) })
-  function handleCreate(event: FormEvent<HTMLFormElement>): void { event.preventDefault(); const data = new FormData(event.currentTarget); create.mutate({ name: String(data.get('name')).trim(), description: String(data.get('description')).trim() }) }
-  return <div className="page"><PageHeader title="评测数据集" description="用明确的问题、参考答案与证据，建立可复现的评测基准。" actions={<><Button variant="secondary" busy={example.isPending} onClick={() => example.mutate()}><Download size={15} />导入 100 题示例</Button><Button onClick={() => setOpen(true)}><Plus size={16} />新建数据集</Button></>} /><EvalNav current="datasets" /><div className="mb-6"><Notice>示例问题用于学习与流程验证，不代表已审核的评测金标准。导入示例不会自动导入 PDF；请下载源文档并上传到知识库。</Notice></div>{query.isPending ? <Loading /> : query.isError ? <ErrorState error={query.error} retry={() => { void query.refetch() }} /> : !query.data.length ? <Empty title="创建你的评测基准" description="手动添加问题，或导入 JSONL / CSV。也可以从 100 题示例开始，再逐条核对证据。" action={<Button onClick={() => setOpen(true)}><Plus size={15} />新建数据集</Button>} /> : <div className="table-wrap"><table><thead><tr><th>数据集名称</th><th>问题数</th><th>创建时间</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{query.data.map(dataset => <tr key={dataset.id}><td><Link to={`/evaluation/datasets/${dataset.id}`} className="font-medium hover:text-accent-700">{dataset.name}</Link><p className="text-xs text-slate-500 mt-1.5">{dataset.description || '暂无描述'}</p></td><td>{dataset.question_count}</td><td className="text-slate-500">{formatDate(dataset.created_at)}</td><td><Link className="text-link whitespace-nowrap" to={`/evaluation/datasets/${dataset.id}`}>管理问题<ArrowUpRight size={14} /></Link></td></tr>)}</tbody></table></div>}<Modal open={open} onOpenChange={value => { if (!create.isPending) setOpen(value) }} title="新建评测数据集" description="先创建数据集，再导入或添加问题。"><form className="dialog-body space-y-5" onSubmit={handleCreate}><Field label="数据集名称"><input name="name" required maxLength={200} placeholder="例如：论文问答基准 v1" autoFocus /></Field><Field label="描述（可选）"><textarea name="description" rows={3} placeholder="说明评测的内容与范围" /></Field>{create.error && <ErrorState error={create.error} />}<div className="dialog-actions"><Button variant="secondary" onClick={() => setOpen(false)} disabled={create.isPending}>取消</Button><Button type="submit" busy={create.isPending}>创建数据集</Button></div></form></Modal></div>
+  const create = useAction((body: { name: string; description: string }) => post<Dataset>('/datasets', body), { invalidate: ['/datasets'], success: '题集已创建', onSuccess: dataset => { setOpen(false); navigate(`/evaluation/datasets/${dataset.id}`) } })
+  const example = useAction(() => post<Dataset>('/datasets/import-example'), { invalidate: ['/datasets'], success: '示例题集已就绪，请另行上传对应 PDF', onSuccess: dataset => navigate(`/evaluation/datasets/${dataset.id}`) })
+  const all = query.data ?? []
+  const visible = all.filter(dataset => `${dataset.name} ${dataset.description}`.toLowerCase().includes(search.trim().toLowerCase()))
+  const current = Math.min(page, Math.max(1, Math.ceil(visible.length / pageSize)))
+  const columns: Column<Dataset>[] = [
+    { key: 'name', header: '题集', cell: dataset => <><Link to={`/evaluation/datasets/${dataset.id}`} className="tm-linkbtn">{dataset.name}</Link>{dataset.description && <span className="tm-table-sub ev-clamp">{dataset.description}</span>}</> },
+    { key: 'count', header: '题数', align: 'right', nowrap: true, width: 90, cell: dataset => <span className="tm-num">{dataset.question_count}</span> },
+    { key: 'created', header: '创建时间', nowrap: true, width: 140, cell: dataset => <span className="tm-faint tm-num">{formatDate(dataset.created_at)}</span> },
+  ]
+  const actions = <>
+    <Button variant="secondary" busy={example.isPending} onClick={() => example.mutate(undefined)}><Download size={14} />导入 100 题示例</Button>
+    <Button onClick={() => setOpen(true)}><Plus size={15} />新建题集</Button>
+  </>
+  return <Page side={<EvaluationSide section="datasets" />} title="评测题集" actions={actions}>
+    {query.isPending ? <Loading /> : query.isError ? <ErrorState error={query.error} retry={() => { void query.refetch() }} /> : !all.length
+      ? <div className="tm-panel"><Empty title="还没有题集" description="手动添加问题，或导入 JSONL、CSV 文件。" action={<Button onClick={() => setOpen(true)}><Plus size={15} />新建题集</Button>} /></div>
+      : <>
+        <div className="ev-filter">
+          <label className="tm-search ev-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索题集" placeholder="搜索题集" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} /></label>
+        </div>
+        <div className="tm-panel">
+          <DataTable label="评测题集" columns={columns} rows={visible.slice((current - 1) * pageSize, current * pageSize)} rowKey={dataset => dataset.id} minWidth={560}
+            onRowClick={dataset => navigate(`/evaluation/datasets/${dataset.id}`)} empty="没有符合条件的题集" />
+          <Pager total={visible.length} page={current} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} unit="个" />
+        </div>
+      </>}
+    {open && <NewDatasetDrawer pending={create.isPending} error={create.error} onSubmit={create.mutate} onClose={() => setOpen(false)} />}
+  </Page>
 }
 
 function parseEvidence(text: string): Evidence[] {
@@ -29,33 +71,114 @@ function parseEvidence(text: string): Evidence[] {
     return { page: Number(entry.page), quote: entry.quote, ...('document_id' in entry && typeof entry.document_id === 'string' ? { document_id: entry.document_id } : {}), ...('doc_id' in entry && typeof entry.doc_id === 'string' ? { doc_id: entry.doc_id } : {}) }
   })
 }
-interface QuestionEditorProps { datasetId: string; question?: Question; onClose: () => void; onPendingChange: (pending: boolean) => void }
-function QuestionEditor({ datasetId, question, onClose, onPendingChange }: QuestionEditorProps) {
-  const save = useAction((body: QuestionFields) => question ? api<Question>(`/questions/${question.id}`, { method: 'PATCH', body: JSON.stringify(body) }) : post<Question>(`/datasets/${datasetId}/questions`, body), { invalidate: [`/datasets/${datasetId}/questions`, '/datasets'], success: '问题已保存', onSuccess: onClose })
-  useEffect(() => { onPendingChange(save.isPending) }, [save.isPending, onPendingChange])
+
+/** Question editor in a drawer; mounted per question so its fields start from that question. */
+function QuestionDrawer({ datasetId, question, position, onPrev, onNext, onClose }: {
+  datasetId: string; question?: Question; position?: string; onPrev?: () => void; onNext?: () => void; onClose: () => void
+}) {
+  const [text, setText] = useState(question?.question ?? '')
+  const [answer, setAnswer] = useState(question?.reference_answer ?? '')
+  const [answerable, setAnswerable] = useState(question?.answerable ?? true)
+  const [reviewed, setReviewed] = useState(question?.review_status === 'reviewed')
+  const [evidence, setEvidence] = useState(JSON.stringify(question?.evidence ?? [], null, 2))
   const [validation, setValidation] = useState('')
+  const save = useAction((body: QuestionFields) => question ? api<Question>(`/questions/${question.id}`, { method: 'PATCH', body: JSON.stringify(body) }) : post<Question>(`/datasets/${datasetId}/questions`, body), { invalidate: [`/datasets/${datasetId}/questions`, '/datasets'], success: '问题已保存', onSuccess: onClose })
   function handleSave(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault(); const form = new FormData(event.currentTarget)
-    try { const evidence = parseEvidence(String(form.get('evidence'))); setValidation(''); save.mutate({ question: String(form.get('question')).trim(), reference_answer: String(form.get('reference_answer')).trim(), answerable: form.get('answerable') === 'on', review_status: form.get('review_status') === 'on' ? 'reviewed' : 'pending', evidence }) } catch (error) { setValidation(error instanceof Error ? error.message : '证据 JSON 格式不正确') }
+    event.preventDefault(); if (save.isPending) return
+    try { const parsed = parseEvidence(evidence); setValidation(''); save.mutate({ question: text.trim(), reference_answer: answer.trim(), answerable, review_status: reviewed ? 'reviewed' : 'pending', evidence: parsed }) } catch (error) { setValidation(error instanceof Error ? error.message : '证据 JSON 格式不正确') }
   }
-  return <form className="dialog-body space-y-5" onSubmit={handleSave}><fieldset disabled={save.isPending} className="space-y-5"><Field label="问题"><textarea name="question" rows={3} required defaultValue={question?.question} placeholder="输入清晰、可验证的问题" autoFocus /></Field><Field label="参考答案（可选）" hint="没有参考答案时，不计算词面匹配指标，不会将缺失值记为零。"><textarea name="reference_answer" rows={4} defaultValue={question?.reference_answer} /></Field><div className="flex flex-wrap gap-6"><label className="checkbox-label"><input type="checkbox" name="answerable" defaultChecked={question?.answerable ?? true} />根据文档可回答</label><label className="checkbox-label"><input type="checkbox" name="review_status" defaultChecked={question?.review_status === 'reviewed'} />已人工核对问题与证据</label></div><Field label="证据（JSON 数组）" hint={'每项包含 document_id（字符串）或 doc_id（文件名不含扩展名）、page（从 1 开始）、quote。无证据填 []。'}><textarea className="font-mono text-xs" name="evidence" rows={7} defaultValue={JSON.stringify(question?.evidence ?? [], null, 2)} spellCheck={false} /></Field></fieldset>{validation && <p role="alert" className="text-sm text-red-700">{validation}</p>}{save.error && <ErrorState error={save.error} />}<div className="dialog-actions"><Button variant="secondary" disabled={save.isPending} onClick={onClose}>取消</Button><Button type="submit" busy={save.isPending}>保存问题</Button></div></form>
+  return <Drawer open onOpenChange={open => { if (!open && !save.isPending) onClose() }} title={question ? '编辑问题' : '添加问题'} position={position} onPrev={onPrev} onNext={onNext} width={560}
+    footer={<div className="ev-actions"><Button variant="secondary" disabled={save.isPending} onClick={onClose}>取消</Button><Button type="submit" form="question-form" busy={save.isPending}>保存问题</Button></div>}>
+    <form id="question-form" className="ev-form ev-form-flush" onSubmit={handleSave}>
+      <fieldset disabled={save.isPending} className="ev-fieldset ev-form-fields">
+        <FormField label="问题"><textarea className="tm-input" rows={3} required value={text} onChange={event => setText(event.target.value)} placeholder="输入清晰、可验证的问题" autoFocus /></FormField>
+        <FormField label="参考答案（可选）"><textarea className="tm-input" rows={4} value={answer} onChange={event => setAnswer(event.target.value)} /></FormField>
+        <div className="ev-checks">
+          <label className="ev-check"><input type="checkbox" className="tm-check" checked={answerable} onChange={event => setAnswerable(event.target.checked)} /><span>根据文档可回答</span></label>
+          <label className="ev-check"><input type="checkbox" className="tm-check" checked={reviewed} onChange={event => setReviewed(event.target.checked)} /><span>已人工核对问题与证据</span></label>
+        </div>
+        <FormField label="证据（JSON 数组）" hint="每项包含 document_id 或 doc_id、page（从 1 开始）、quote；无证据填 []">
+          <textarea className="tm-input tm-mono" rows={8} value={evidence} onChange={event => setEvidence(event.target.value)} spellCheck={false} />
+        </FormField>
+      </fieldset>
+      {validation && <p role="alert" className="ev-fail">{validation}</p>}
+      {save.error && <ErrorState error={save.error} />}
+    </form>
+  </Drawer>
 }
+
+type ReviewFilter = 'all' | 'pending' | 'reviewed'
+
 export function DatasetDetail() {
   const { id = '' } = useParams()
   const datasets = useApi<Dataset[]>('/datasets')
   const dataset = datasets.data?.find(item => item.id === id)
   const questions = useApi<Question[]>(`/datasets/${id}/questions`)
   const examples = useApi<{ name: string; url: string }[]>('/examples')
-  const [editor, setEditor] = useState<Question | 'new' | null>(null)
-  const [savePending, setSavePending] = useState(false)
+  const [editor, setEditor] = useState<string | 'new' | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [search, setSearch] = useState('')
-  const [review, setReview] = useState('all')
+  const [review, setReview] = useState<ReviewFilter>('all')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const imported = useAction((input: File) => { const form = new FormData(); form.append('file', input); return post<unknown>(`/datasets/${id}/import`, form) }, { invalidate: [`/datasets/${id}/questions`, '/datasets'], success: '问题导入成功', onSuccess: () => { setImportOpen(false); setFile(null) } })
-  const filtered = questions.data?.filter(item => item.question.toLowerCase().includes(search.toLowerCase()) && (review === 'all' || item.review_status === review)) ?? []
-  const pageCount = Math.max(1, Math.ceil(filtered.length / 25))
-  const currentPage = Math.min(page, pageCount)
-  return <div className="page"><PageHeader title={dataset?.name ?? '数据集详情'} description={dataset?.description || '编辑问题与参考答案，逐条核对证据；审核状态保存在问题中。'} back={{ to: '/evaluation/datasets', label: '所有数据集' }} actions={<><Button variant="secondary" onClick={() => setImportOpen(true)}><Upload size={15} />导入文件</Button><Button onClick={() => setEditor('new')}><Plus size={16} />添加问题</Button></>} /><div className="panel p-4 mb-6"><div className="flex flex-wrap items-center gap-3"><FileJson size={17} className="text-accent-700" /><span className="text-sm font-medium">示例源文档</span><span className="text-xs text-slate-500">下载后上传到评测所用知识库</span>{examples.data?.map(example => <a className="text-link text-xs" href={`/api/examples/${encodeURIComponent(example.name)}`} target="_blank" rel="noopener noreferrer" key={example.name}><Download size={12} />{example.name}</a>)}</div>{examples.isError && <p className="text-xs text-slate-500 mt-2">示例文件列表暂不可用。<button className="text-link ml-2" onClick={() => { void examples.refetch() }}>重试</button></p>}</div><div className="toolbar"><div className="search-field"><Search size={16} /><input aria-label="搜索问题" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} placeholder="搜索问题…" /></div><div className="flex items-center gap-3"><span className="text-xs text-slate-500">{filtered.length} 个问题</span><Select label="审核状态筛选" className="select-auto" value={review} onChange={value => { setReview(value); setPage(1) }} options={[{ value: 'all', label: '全部审核状态' }, { value: 'pending', label: '待审核' }, { value: 'reviewed', label: '已审核' }]} /></div></div>{questions.isPending ? <Loading /> : questions.isError ? <ErrorState error={questions.error} retry={() => { void questions.refetch() }} /> : !filtered.length ? <Empty title="暂无匹配问题" description="添加一个问题或导入文件；如果已有问题，请调整筛选条件。" action={<Button variant="secondary" onClick={() => setEditor('new')}><Plus size={15} />添加问题</Button>} /> : <><div className="table-wrap"><table><thead><tr><th className="w-12">序号</th><th>问题 / 参考答案</th><th>标注</th><th>审核状态</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{filtered.slice((currentPage - 1) * 25, currentPage * 25).map((question, index) => <tr key={question.id}><td className="text-slate-400 text-xs">{(currentPage - 1) * 25 + index + 1}</td><td className="max-w-xl"><p className="font-medium leading-6">{question.question}</p><details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">参考答案与证据</summary><p className="my-3 whitespace-pre-wrap leading-6 text-slate-600">{question.reference_answer || '未标注参考答案'}</p>{question.evidence?.map((evidence, i) => <blockquote key={i} className="border-l-2 border-accent-100 pl-3 my-2 leading-6"><strong>{evidence.doc_id || evidence.document_id || '未指定文档'} · 第 {evidence.page} 页</strong><p>{evidence.quote}</p></blockquote>)}</details></td><td className="text-xs whitespace-nowrap"><p>{question.answerable ? '可回答' : '不可回答'}</p><p className="text-slate-500 mt-1">{question.evidence?.length ?? 0} 条证据</p></td><td><Status value={question.review_status} /></td><td><Button variant="ghost" onClick={() => setEditor(question)} aria-label={`编辑问题 ${index + 1}`}><Pencil size={15} /></Button></td></tr>)}</tbody></table></div><div className="pagination"><span>第 {currentPage} / {pageCount} 页 · 每页 25 题</span><div className="flex gap-2"><Button variant="secondary" disabled={currentPage <= 1} onClick={() => setPage(value => value - 1)}>上一页</Button><Button variant="secondary" disabled={currentPage >= pageCount} onClick={() => setPage(value => value + 1)}>下一页</Button></div></div></>}<Modal open={editor !== null} preventClose={savePending} onOpenChange={open => { if (!open) setEditor(null) }} title={editor === 'new' ? '添加问题' : '编辑问题'} description="标注内容直接保存到数据集；已创建的评测使用自己的输入快照。" wide>{editor && <QuestionEditor onPendingChange={setSavePending} key={editor === 'new' ? 'new' : editor.id} datasetId={id} question={editor === 'new' ? undefined : editor} onClose={() => setEditor(null)} />}</Modal><Modal open={importOpen} onOpenChange={open => { if (!imported.isPending) setImportOpen(open) }} title="导入评测问题" description="支持 UTF-8 编码的 JSONL 或 CSV。整份文件验证通过后才写入。"><form className="dialog-body space-y-5" onSubmit={e => { e.preventDefault(); if (file) imported.mutate(file) }}><Notice>CSV 列：question、reference_answer、answerable；可选 evidence（JSON 数组）。JSONL 每行一个问题对象，ID 使用字符串。</Notice><Field label="问题文件"><input type="file" accept=".jsonl,.csv" disabled={imported.isPending} required onChange={e => { const selected = e.target.files?.[0]; if (selected && !/\.(jsonl|csv)$/i.test(selected.name)) { toast.error('请选择 .jsonl 或 .csv 文件'); return }; setFile(selected ?? null) }} /></Field>{imported.error && <ErrorState error={imported.error} />}{imported.data !== undefined && <JsonDetails value={imported.data} label="上次导入结果" />}<div className="dialog-actions"><Button variant="secondary" onClick={() => setImportOpen(false)} disabled={imported.isPending}>取消</Button><Button type="submit" busy={imported.isPending} disabled={!file}>验证并导入</Button></div></form></Modal></div>
+  const all = questions.data ?? []
+  const counts: Record<ReviewFilter, number> = { all: all.length, pending: all.filter(item => item.review_status === 'pending').length, reviewed: all.filter(item => item.review_status === 'reviewed').length }
+  const filtered = all.filter(item => item.question.toLowerCase().includes(search.trim().toLowerCase()) && (review === 'all' || item.review_status === review))
+  const current = Math.min(page, Math.max(1, Math.ceil(filtered.length / pageSize)))
+  const editing = editor && editor !== 'new' ? all.find(item => item.id === editor) : undefined
+  const editIndex = editing ? filtered.findIndex(item => item.id === editing.id) : -1
+  const columns: Column<Question>[] = [
+    { key: 'n', header: '序号', align: 'right', width: 56, cell: (_question, index) => <span className="tm-faint tm-num">{(current - 1) * pageSize + index + 1}</span> },
+    { key: 'question', header: '问题', cell: question => <><button type="button" className="tm-linkbtn ev-q" onClick={() => setEditor(question.id)}>{question.question}</button>{question.reference_answer && <span className="tm-table-sub ev-clamp">{question.reference_answer}</span>}</> },
+    { key: 'labels', header: '标注', nowrap: true, cell: question => <><Tag tone={question.answerable ? 'neutral' : 'warn'}>{question.answerable ? '可回答' : '不可回答'}</Tag><span className="tm-table-sub tm-num">{question.evidence?.length ?? 0} 条证据</span></> },
+    { key: 'review', header: '审核状态', nowrap: true, cell: question => <StatusTag value={question.review_status} label={question.review_status === 'reviewed' ? '已审核' : '待审核'} /> },
+    { key: 'edit', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: (question, index) => <button type="button" className="tm-textlink" aria-label={`编辑问题 ${(current - 1) * pageSize + index + 1}`} onClick={() => setEditor(question.id)}>编辑</button> },
+  ]
+  const actions = <>
+    <Button variant="secondary" onClick={() => setImportOpen(true)}><Upload size={14} />导入文件</Button>
+    <Button onClick={() => setEditor('new')}><Plus size={15} />添加问题</Button>
+  </>
+  return <Page side={<EvaluationSide section="datasets" />} title={dataset?.name ?? '题集'} crumbs={[{ to: '/evaluation/datasets', label: '评测题集' }]} actions={actions}
+    meta={dataset?.description ? <span className="tm-muted ev-desc">{dataset.description}</span> : undefined}>
+    {questions.isPending ? <Loading /> : questions.isError ? <ErrorState error={questions.error} retry={() => { void questions.refetch() }} /> : <>
+      <FactStrip items={[
+        { label: '题数', value: String(all.length) },
+        { label: '已审核', value: `${counts.reviewed} / ${all.length}` },
+        { label: '可回答', value: String(all.filter(item => item.answerable).length) },
+        { label: '带证据', value: String(all.filter(item => item.evidence?.length).length) },
+        { label: '创建', value: formatDate(dataset?.created_at) },
+      ]} />
+      <div className="ev-filter">
+        <label className="tm-search ev-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索问题" placeholder="搜索问题" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} /></label>
+        <Segmented label="审核状态筛选" value={review} onChange={value => { setReview(value); setPage(1) }} items={[
+          { value: 'all', label: '全部', count: counts.all }, { value: 'pending', label: '待审核', count: counts.pending }, { value: 'reviewed', label: '已审核', count: counts.reviewed },
+        ]} />
+        <span className="flex-1" />
+        {!!examples.data?.length && <MenuPopover label="示例源文档" text="示例源文档">
+          {examples.data.map(example => <a key={example.name} className="ev-menu-item" href={`/api/examples/${encodeURIComponent(example.name)}`} target="_blank" rel="noopener noreferrer"><Download size={13} aria-hidden="true" />{example.name}</a>)}
+        </MenuPopover>}
+      </div>
+      <div className="tm-panel">
+        <DataTable label="题集问题" columns={columns} rows={filtered.slice((current - 1) * pageSize, current * pageSize)} rowKey={question => question.id} minWidth={640} selectedKey={editor}
+          onRowClick={question => setEditor(question.id)} empty={all.length ? '没有符合条件的问题' : <Empty title="题集里还没有问题" description="添加一个问题，或导入文件。" action={<Button variant="secondary" onClick={() => setEditor('new')}><Plus size={14} />添加问题</Button>} />} />
+        <Pager total={filtered.length} page={current} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} unit="题" />
+      </div>
+    </>}
+    {(editor === 'new' || editing) && <QuestionDrawer key={editing?.id ?? 'new'} datasetId={id} question={editing} onClose={() => setEditor(null)}
+      position={editIndex >= 0 ? `${editIndex + 1} / ${filtered.length}` : undefined}
+      onPrev={editIndex > 0 ? () => setEditor(filtered[editIndex - 1].id) : undefined}
+      onNext={editIndex >= 0 && editIndex < filtered.length - 1 ? () => setEditor(filtered[editIndex + 1].id) : undefined} />}
+    {importOpen && <Drawer open onOpenChange={open => { if (!open && !imported.isPending) setImportOpen(false) }} title="导入问题" width={480}
+      footer={<div className="ev-actions"><Button variant="secondary" onClick={() => setImportOpen(false)} disabled={imported.isPending}>取消</Button><Button type="submit" form="import-form" busy={imported.isPending} disabled={!file}>验证并导入</Button></div>}>
+      <form id="import-form" className="ev-form ev-form-flush" onSubmit={event => { event.preventDefault(); if (file) imported.mutate(file) }}>
+        <FormField label="问题文件" hint="UTF-8 编码的 JSONL 或 CSV；CSV 列为 question、reference_answer、answerable，可选 evidence（JSON 数组）">
+          <input type="file" accept=".jsonl,.csv" disabled={imported.isPending} required onChange={event => { const selected = event.target.files?.[0]; if (selected && !/\.(jsonl|csv)$/i.test(selected.name)) { toast.error('请选择 .jsonl 或 .csv 文件'); return }; setFile(selected ?? null) }} />
+        </FormField>
+        {imported.error && <ErrorState error={imported.error} />}
+        {imported.data !== undefined && <JsonDetails value={imported.data} label="上次导入结果" />}
+      </form>
+    </Drawer>}
+  </Page>
 }

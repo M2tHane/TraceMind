@@ -1,19 +1,42 @@
 import { useState } from 'react'
-import { Check, Copy, MessageSquare, UserRound } from 'lucide-react'
+import { Check, Copy } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Message } from '../lib/types'
-import { CitationList, DebugInfo, Markdown } from './sources'
-import { ErrorState, Status, statusLabel } from './ui'
+import type { Citation, Message } from '../lib/types'
+import { formatNumber } from '../lib/api'
+import { formatMs } from '../lib/trace'
+import { Markdown } from './sources'
+import { BrandMark, CiteMarker, ErrorState } from './ui'
+
+export function distinctCitations(citations: Citation[]): Citation[] {
+  return [...new Map(citations.map(c => [`${c.document_id}:${c.id}:${c.page}`, c])).values()]
+}
 
 function MessageTime({ value }: { value: string }) {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return null
-  return <time className="message-time" dateTime={value} title={date.toLocaleString('zh-CN')}>{date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
+  const today = new Date().toDateString() === date.toDateString()
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return <time className="message-time" dateTime={value} title={date.toLocaleString('zh-CN')}>{today ? time : `${date.getMonth() + 1}/${date.getDate()} ${time}`}</time>
 }
 
-export function ChatMessage({ message }: { message: Message }) {
+// Message.stage only distinguishes retrieving from generating; the three retrieval steps move together.
+const STEPS = ['范围过滤', '召回', '重排', '生成']
+const STAGE_TEXT: Record<string, string> = { queued: '排队中', retrieving: '正在检索相关片段', generating: '正在生成回答' }
+function Pending({ message }: { message: Message }) {
+  const stage = message.status === 'queued' ? 'queued' : message.stage
+  const state = (index: number) => stage === 'generating' ? (index < 3 ? 'done' : 'now') : stage === 'retrieving' ? (index < 3 ? 'now' : 'todo') : 'todo'
+  return <div className="pending-answer" role="status">
+    <ol aria-label="处理进度">{STEPS.map((label, index) => <li key={label} data-step={state(index)}><span aria-hidden="true" />{label}</li>)}</ol>
+    <p>{STAGE_TEXT[stage] ?? '正在处理'}</p>
+  </div>
+}
+
+export interface MessageEvidence { active: boolean; citation: number; onCite: (index: number) => void; onSources: () => void; onTrace: () => void }
+
+export function ChatMessage({ message, initial = '我', evidence }: { message: Message; initial?: string; evidence?: MessageEvidence }) {
   const [copied, setCopied] = useState(false)
   const assistant = message.role === 'assistant'
+  const citations = distinctCitations(message.citations ?? [])
   async function copyAnswer(): Promise<void> {
     try {
       await navigator.clipboard.writeText(message.content)
@@ -23,22 +46,39 @@ export function ChatMessage({ message }: { message: Message }) {
       toast.error('复制失败，请选中回答文本后复制')
     }
   }
-  return <article className={`message message-${message.role}`}>
-    <div className="chat-avatar" aria-hidden="true">{assistant ? <MessageSquare size={22} strokeWidth={1.8} /> : <UserRound size={22} strokeWidth={1.8} />}</div>
+  if (!assistant) return <article className="message message-user">
+    <span className="chat-avatar" aria-hidden="true">{initial}</span>
+    <div className="message-body"><span className="sr-only">你</span><p className="user-content">{message.content}</p><MessageTime value={message.created_at} /></div>
+  </article>
+  const pending = ['queued', 'processing'].includes(message.status)
+  const snapshot = message.model_snapshot
+  return <article className="message message-assistant" data-active={evidence?.active || undefined}>
+    <span className="chat-avatar" aria-hidden="true"><BrandMark size={14} tile={false} /></span>
     <div className="message-body">
-      <span className="sr-only">{assistant ? '回答' : '你'}</span>
-      {!assistant ? <><p className="user-content">{message.content}</p><MessageTime value={message.created_at} /></> : <>
-        {message.content && <div className="assistant-bubble"><Markdown text={message.content} /></div>}
-        {['queued', 'processing'].includes(message.status) && <div className="pending-answer"><Status value={message.status} /><span>{statusLabel(message.stage || message.status)}，请稍候。</span></div>}
-        {message.status === 'failed' && <ErrorState error={new Error(message.error || '生成失败，请检查服务配置后重新提问。')} />}
-        {message.status === 'completed' && <>
-          <div className="message-support">
-            <CitationList citations={message.citations ?? []} compact />
-            {message.content && <button type="button" className="message-copy" aria-label={copied ? '再次复制回答' : '复制回答'} onClick={() => { void copyAnswer() }}>{copied ? <Check size={14} /> : <Copy size={14} />}<span>{copied ? '已复制' : '复制'}</span></button>}
+      <span className="sr-only">回答</span>
+      {pending ? <Pending message={message} />
+        : message.status === 'failed' ? <ErrorState error={new Error(message.error || '生成失败，请检查服务配置后重新提问。')} />
+          : message.content && <div className="assistant-bubble">
+            <Markdown text={message.content} />
+            {citations.length > 0 && <p className="answer-cites">{citations.map((citation, index) =>
+              <CiteMarker key={`${citation.document_id}:${citation.id}`} n={index + 1} active={!!evidence?.active && evidence.citation === index}
+                label={`引用 ${index + 1}：${citation.filename}${citation.page ? ` 第 ${citation.page} 页` : ''}`} onClick={evidence ? () => evidence.onCite(index) : undefined} />)}</p>}
+          </div>}
+      {message.status === 'completed' && <div className="message-support">
+        <MessageTime value={message.created_at} />
+        <button type="button" className="message-meta-link" aria-label={`引用来源，${citations.length} 条`} onClick={evidence?.onSources}>引用 {citations.length} 处</button>
+        {message.timing?.retrieval_ms != null && <span className="tm-num">召回 {formatMs(message.timing.retrieval_ms)}</span>}
+        {message.timing?.generation_ms != null && <span className="tm-num">生成 {formatMs(message.timing.generation_ms)}</span>}
+        {!!message.retrieval_trace?.stages?.length && <button type="button" className="tm-textlink" onClick={evidence?.onTrace}>召回链路</button>}
+        {snapshot && <details className="debug-details message-model">
+          <summary>{snapshot.name}</summary>
+          <div className="message-model-pop">
+            <p>本轮模型：{snapshot.name}</p><p>模型 ID：{snapshot.model}</p><p>协议：{snapshot.protocol}</p>
+            {message.usage?.total_tokens != null && <p className="tm-faint">{formatNumber(message.usage.total_tokens)} tokens</p>}
           </div>
-          <div className="message-meta"><MessageTime value={message.created_at} /><DebugInfo method={message.method} timing={message.timing} usage={message.usage} contexts={message.contexts} modelSnapshot={message.model_snapshot} trace={message.retrieval_trace?.stages} queries={message.retrieval_trace?.queries} config={message.retrieval_trace?.config} memoriesUsed={message.retrieval_trace?.memories_used} /></div>
-        </>}
-      </>}
+        </details>}
+        {message.content && <button type="button" className="tm-btn tm-btn-icon message-copy" aria-label={copied ? '再次复制回答' : '复制回答'} title="复制回答" onClick={() => { void copyAnswer() }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
+      </div>}
     </div>
   </article>
 }

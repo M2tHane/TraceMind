@@ -1,47 +1,73 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { CheckCircle2, Database, ExternalLink, LockKeyhole, RefreshCw } from 'lucide-react'
+import { ExternalLink, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, post, useAction, useApi } from '../lib/api'
 import type { ServiceCheck, Settings } from '../lib/types'
 import { secretPatch, type RerankProtocol, type ServiceSettingsPatch } from '../lib/configuration'
-import { SecretField, TestConnection } from '../components/ConfigurationControls'
-import { Select } from '../components/Select'
-import { Button, ErrorState, Field, Loading, Notice, PageHeader, Status } from '../components/ui'
+import { FormField, SecretField, TestConnection } from '../components/ConfigurationControls'
+import { SettingsSide } from '../components/shell/ModuleNav'
+import { Page } from '../components/shell/Shell'
+import { Button, DataTable, Empty, ErrorState, Loading, Notice, Segmented, StatusTag, Tag, buttonClass } from '../components/ui'
 import { SettingsModels } from './SettingsModels'
 
 type Service = 'embedding' | 'rerank' | 'mineru' | 'milvus'
-const SERVICES: { id: Service; name: string; description: string }[] = [
-  { id: 'embedding', name: 'Embedding', description: '文档索引与语义检索' },
-  { id: 'rerank', name: 'Rerank', description: '候选上下文相关性排序' },
-  { id: 'mineru', name: 'MinerU', description: 'PDF 文档解析' },
-  { id: 'milvus', name: 'Milvus', description: '向量存储与检索' },
+const SERVICES: Record<Service, { name: string; description: string }> = {
+  embedding: { name: 'Embedding', description: '文档索引与语义检索' },
+  rerank: { name: 'Rerank', description: '候选上下文相关性排序' },
+  mineru: { name: 'MinerU', description: 'PDF 文档解析' },
+  milvus: { name: 'Milvus', description: '向量存储与检索' },
+}
+
+export function ModelSettingsPage() {
+  return <SettingsModels />
+}
+
+function ServiceGroup({ services }: { services: Service[] }) {
+  const settings = useApi<Settings>('/settings')
+  const data = settings.data
+  if (settings.isPending) return <Loading />
+  if (settings.isError) return <ErrorState error={settings.error} retry={() => { void settings.refetch() }} />
+  return <>
+    {!data!.editable && <Notice>当前后端尚未启用在线配置，请更新后端后刷新。</Notice>}
+    <div className="st-services">{services.map(id => <ServiceEditor key={id} service={id} name={SERVICES[id].name} settings={data!} />)}</div>
+  </>
+}
+
+export function ServiceSettingsPage() {
+  return <Page side={<SettingsSide />} title="Embedding 与重排"><ServiceGroup services={['embedding', 'rerank']} /></Page>
+}
+
+export function StorageSettingsPage() {
+  return <Page side={<SettingsSide />} title="文档解析与向量库">
+    <ServiceGroup services={['mineru', 'milvus']} />
+    <section className="tm-panel st-service" aria-label="PostgreSQL 配置">
+      <div className="tm-panel-title"><h2>PostgreSQL</h2></div>
+      <div className="st-service-body">
+        <p className="tm-muted m-0">数据库连接仅在后端启动时配置，不支持在浏览器中热切换。修改启动配置后需重启后端。</p>
+        <div className="st-service-foot"><TestConnection endpoint="/settings/test/postgres" name="PostgreSQL" /></div>
+      </div>
+    </section>
+  </Page>
+}
+
+const CHECK_COLUMNS = [
+  { key: 'name', header: '检查项', cell: (item: ServiceCheck) => <span className="font-medium">{item.name}</span>, nowrap: true, width: 220 },
+  { key: 'status', header: '结果', cell: (item: ServiceCheck) => <StatusTag value={item.status} />, nowrap: true, width: 120 },
+  { key: 'detail', header: '详情', cell: (item: ServiceCheck) => <span className="tm-muted break-words">{item.detail}</span> },
 ]
 
-export function SettingsPage() {
-  const settings = useApi<Settings>('/settings')
+export function HealthPage() {
   const check = useAction(() => post<{ checks: ServiceCheck[] }>('/settings/check'), { success: '环境检查已完成' })
-  const data = settings.data
-  return <div className="page model-settings-page">
-    <PageHeader title="环境与设置" description="管理模型与服务。密钥仅写入后端，不会回显。" actions={<Button variant="secondary" busy={check.isPending} onClick={() => check.mutate()}><RefreshCw size={15} />环境检查（不计费）</Button>} />
-    <div className="settings-layout">
-      <div className="space-y-8">
-        <SettingsModels />
-        {settings.isPending ? <Loading /> : settings.isError ? <ErrorState error={settings.error} retry={() => { void settings.refetch() }} /> : data && <section className="panel" aria-label="服务配置">
-          <div className="panel-heading"><Database size={18} /><h2>解析、检索与存储</h2></div>
-          <p className="text-sm text-slate-500 py-3 leading-6">先保存，再测试。更改对新的操作生效，不会自动重建索引。</p>
-          {!data.editable && <Notice>当前后端尚未启用在线配置，请更新后端后刷新。</Notice>}
-          <div className="divide-y">{SERVICES.map(service => <details key={service.id} className="service-editor"><summary><span><strong>{service.name}</strong><span className="text-sm text-slate-500">{service.description}</span></span></summary><ServiceEditor service={service.id} name={service.name} settings={data} /></details>)}</div>
-        </section>}
-        {check.error && <ErrorState error={check.error} />}
-        {check.data && <section className="panel"><div className="panel-heading"><CheckCircle2 size={18} /><h2>环境检查结果</h2></div><div className="divide-y">{check.data.checks.map((item, index) => <div className="py-4 flex items-start gap-4" key={`${item.name}-${index}`}><div className="flex-1 min-w-0"><p className="font-medium text-sm">{item.name}</p><p className="text-sm text-slate-500 mt-2 break-words leading-6">{item.detail}</p></div><Status value={item.status} /></div>)}</div></section>}
-      </div>
-      <aside className="space-y-7">
-        <section className="panel"><div className="panel-heading"><Database size={18} /><h2>PostgreSQL</h2></div><p className="text-sm text-slate-500 leading-7 py-3">数据库连接仅在后端启动时配置，不支持在浏览器中热切换。修改启动配置后需重启后端。</p><TestConnection endpoint="/settings/test/postgres" name="PostgreSQL" /></section>
-        <section className="panel"><div className="flex gap-2 items-center font-medium text-sm"><LockKeyhole size={16} />凭据与调用</div><p className="text-sm text-slate-500 leading-7 mt-3">密钥只用于写入后端，页面仅显示是否已保存。留空保留原密钥，勾选清除后保存才会删除。</p><p className="text-sm text-slate-500 leading-7 mt-3">模型测试需单独确认，可能计费。MinerU、Milvus 和 PostgreSQL 仅检查连接；环境检查不调用付费模型。</p><p className="text-sm text-slate-500 leading-7 mt-3">若使用远程模型，问答中的问题与相关文档片段会发送到对应服务，请确认其数据政策。</p><a className="text-link text-sm mt-4" href="/api/health" target="_blank" rel="noopener noreferrer">查看健康检查 JSON<ExternalLink size={12} /></a></section>
-      </aside>
-    </div>
-  </div>
+  return <Page side={<SettingsSide />} title="环境检查" actions={<>
+    <a className={buttonClass('secondary')} href="/api/health" target="_blank" rel="noopener noreferrer">健康检查 JSON<ExternalLink size={13} /></a>
+    <Button busy={check.isPending} onClick={() => check.mutate()}><RefreshCw size={14} />环境检查（不计费）</Button>
+  </>}>
+    {check.error && <ErrorState error={check.error} />}
+    {check.data
+      ? <section className="tm-panel ad-panel" aria-label="环境检查结果"><DataTable columns={CHECK_COLUMNS} rows={check.data.checks} rowKey={item => item.name} label="环境检查结果" /></section>
+      : !check.error && <section className="tm-panel"><Empty title="尚未运行环境检查" /></section>}
+  </Page>
 }
 
 interface ServiceForm {
@@ -71,6 +97,7 @@ function ServiceEditor({ service, name, settings }: { service: Service; name: st
   const [revision, setRevision] = useState(0)
   const isModel = service === 'embedding' || service === 'rerank'
   const dirty = JSON.stringify(form) !== JSON.stringify(saved) || !!key || clearKey
+  const configured = service === 'embedding' ? settings.embedding.configured : service === 'rerank' ? settings.rerank.configured : undefined
   const save = useAction((patch: ServiceSettingsPatch) => api<Settings>('/settings', { method: 'PATCH', body: JSON.stringify(patch) }), {
     success: `${name} 配置已保存`,
     onSuccess: result => {
@@ -90,17 +117,34 @@ function ServiceEditor({ service, name, settings }: { service: Service; name: st
           : { milvus: { uri: form.uri.trim(), collection: form.collection.trim() } }
     save.mutate(patch)
   }
-  return <form className="space-y-4 pb-5" aria-label={`${name} 配置`} onSubmit={handleSubmit}>
-    {service === 'embedding' && <Notice>更改模型、维度或地址可能使已有知识库索引不兼容。请确认兼容性，或重新建立索引；保存不会自动重建。</Notice>}
-    <fieldset className="space-y-4" disabled={save.isPending || !settings.editable}>
-      {service !== 'milvus' && <Field label="服务地址"><input type="url" required value={form.base_url} onChange={event => setForm({ ...form, base_url: event.target.value })} /></Field>}
-      {isModel && <><Field label="模型 ID"><input required value={form.model} onChange={event => setForm({ ...form, model: event.target.value })} /></Field><SecretField configured={service === 'embedding' ? settings.embedding.configured : settings.rerank.configured} value={key} clear={clearKey} onChange={setKey} onClear={setClearKey} /></>}
-      {service === 'embedding' && <Field label="向量维度"><input required type="number" min={1} step={1} value={form.dimensions} onChange={event => setForm({ ...form, dimensions: Number(event.target.value) })} /></Field>}
-      {service === 'rerank' && <Field label="重排序协议"><Select label="重排序协议" value={form.protocol} options={[{ value: 'dashscope', label: 'DashScope' }, { value: 'standard', label: 'Standard' }]} onChange={value => setForm({ ...form, protocol: value as RerankProtocol })} /></Field>}
-      {service === 'milvus' && <><Field label="连接 URI"><input required value={form.uri} onChange={event => setForm({ ...form, uri: event.target.value })} /></Field><Field label="Collection" hint="必须以 rag_workbench_ 开头；已有数据不会自动迁移。"><input required pattern="rag_workbench_.+" value={form.collection} onChange={event => setForm({ ...form, collection: event.target.value })} /></Field></>}
-      <div className="flex flex-wrap gap-3 items-center"><Button type="submit" busy={save.isPending} disabled={!dirty}>保存配置</Button>{dirty && <span className="text-xs text-slate-500">有未保存的更改</span>}</div>
-    </fieldset>
-    {save.error && <ErrorState error={save.error} />}
-    <TestConnection key={revision} endpoint={`/settings/test/${service}`} name={name} paid={isModel} disabled={dirty || save.isPending} />
-  </form>
+  return <section className="tm-panel st-service">
+    <div className="tm-panel-title">
+      <h2>{name}</h2><span className="tm-muted">{SERVICES[service].description}</span>
+      <span className="flex-1" />
+      {dirty && <Tag tone="warn">有未保存的更改</Tag>}
+      {configured !== undefined && <Tag tone={configured ? 'ok' : 'warn'}>{configured ? '密钥已保存' : '未配置密钥'}</Tag>}
+    </div>
+    <form className="st-service-body" aria-label={`${name} 配置`} onSubmit={handleSubmit}>
+      {service === 'embedding' && <p className="tm-note m-0">更改模型、维度或地址可能使已有知识库索引不兼容。请确认兼容性，或重新建立索引；保存不会自动重建。</p>}
+      <fieldset className="st-fields" disabled={save.isPending || !settings.editable}>
+        {service !== 'milvus' && <FormField label="服务地址"><input className="tm-input tm-mono" type="url" required value={form.base_url} onChange={event => setForm({ ...form, base_url: event.target.value })} /></FormField>}
+        {isModel && <>
+          <FormField label="模型 ID"><input className="tm-input tm-mono" required value={form.model} onChange={event => setForm({ ...form, model: event.target.value })} /></FormField>
+          <SecretField configured={configured ?? false} value={key} clear={clearKey} onChange={setKey} onClear={setClearKey} />
+        </>}
+        {service === 'embedding' && <FormField label="向量维度"><input className="tm-input tm-num" required type="number" min={1} step={1} value={form.dimensions} onChange={event => setForm({ ...form, dimensions: Number(event.target.value) })} /></FormField>}
+        {service === 'rerank' && <div className="tm-field"><span className="tm-field-label">重排序协议</span>
+          <Segmented label="重排序协议" value={form.protocol} onChange={value => setForm({ ...form, protocol: value })} items={[{ value: 'dashscope', label: 'DashScope' }, { value: 'standard', label: 'Standard' }]} /></div>}
+        {service === 'milvus' && <>
+          <FormField label="连接 URI"><input className="tm-input tm-mono" required value={form.uri} onChange={event => setForm({ ...form, uri: event.target.value })} /></FormField>
+          <FormField label="Collection" caption="必须以 rag_workbench_ 开头；已有数据不会自动迁移。"><input className="tm-input tm-mono" required pattern="rag_workbench_.+" value={form.collection} onChange={event => setForm({ ...form, collection: event.target.value })} /></FormField>
+        </>}
+      </fieldset>
+      {save.error && <ErrorState error={save.error} />}
+      <div className="st-service-foot">
+        <Button type="submit" busy={save.isPending} disabled={!dirty || !settings.editable}>保存配置</Button>
+        <TestConnection key={revision} endpoint={`/settings/test/${service}`} name={name} paid={isModel} disabled={dirty || save.isPending} />
+      </div>
+    </form>
+  </section>
 }

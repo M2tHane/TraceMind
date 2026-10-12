@@ -1,17 +1,30 @@
-import { useEffect, useId, useState } from 'react'
+import { isValidElement, useEffect, useId, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ChevronDown, ExternalLink, FileText, Quote } from 'lucide-react'
-import { methodLabel, type Citation, type RagResult, type Timing, type TraceStage, type Usage } from '../lib/types'
+import rehypeHighlight from 'rehype-highlight'
+import { Check, Copy, FileText } from 'lucide-react'
+import { methodLabel, type Citation, type RagResult, type RetrievalConfig, type Timing, type TraceStage, type Usage } from '../lib/types'
 import { formatNumber } from '../lib/api'
 import type { PublicModelSnapshot } from '../lib/configuration'
-import { Empty, Modal, Notice } from './ui'
+import { formatMs } from '../lib/trace'
+import { CiteMarker, Drawer, Empty, Notice, Tag } from './ui'
 import { PdfCanvas } from './PdfCanvas'
 import { RecallTrace, retrievalSummary } from './Retrieval'
-import type { RetrievalConfig } from '../lib/types'
+
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null)
+  const [copied, setCopied] = useState(false)
+  const className = isValidElement<{ className?: string }>(children) ? children.props.className ?? '' : ''
+  const language = /language-([\w+-]+)/.exec(className)?.[1] ?? 'text'
+  function copy(): void {
+    void navigator.clipboard.writeText(ref.current?.textContent ?? '').then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, () => {})
+  }
+  return <div className="code-block"><div className="code-block-head"><span>{language}</span><button type="button" onClick={copy} aria-label={copied ? '代码已复制' : '复制代码'}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : '复制'}</button></div><pre ref={ref}>{children}</pre></div>
+}
 
 export function Markdown({ text }: { text: string }) {
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span className="text-slate-500">[图片：{alt || '文档图片'}]</span> }}>{text}</ReactMarkdown></div>
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false }]]} skipHtml components={{ pre: CodeBlock, a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ alt }) => <span className="tm-faint">[图片：{alt || '文档图片'}]</span> }}>{text}</ReactMarkdown></div>
 }
 export function PdfViewer({ documentId, page, filename }: { documentId: string; page?: number | null; filename: string }) {
   if (!filename.toLowerCase().endsWith('.pdf')) return <TextSource documentId={documentId} markdown={/\.(md|markdown)$/i.test(filename)} />
@@ -30,24 +43,72 @@ function TextSource({ documentId, markdown }: { documentId: string; markdown: bo
     return () => controller.abort()
   }, [documentId])
   if (failed) return <Notice>原文加载失败，请稍后重试。</Notice>
-  if (text === null) return <p className="text-sm text-slate-500 py-2">正在加载原文…</p>
-  return markdown ? <Markdown text={text} /> : <pre className="whitespace-pre-wrap break-words text-sm leading-6">{text}</pre>
+  if (text === null) return <p className="tm-faint py-2">正在加载原文…</p>
+  return markdown ? <Markdown text={text} /> : <pre className="whitespace-pre-wrap break-words leading-6">{text}</pre>
 }
-function CitationExcerpt({ text }: { text: string }) {
+
+/** Plain-text form of a chunk: Markdown markers removed, whitespace collapsed. */
+export function plainExcerpt(text: string): string {
+  return text.replace(/\*\*|__|`/g, '').replace(/(^|\n)\s*(#{1,6}|>|[-*+]|\d+\.)\s+/g, '$1').replace(/\s+/g, ' ').trim()
+}
+
+/** A citation passage, three lines until expanded. */
+export function CitationExcerpt({ text, limit = 220 }: { text: string; limit?: number }) {
   const [expanded, setExpanded] = useState(false)
   const id = useId()
-  const compact = text.replace(/\s+/g, ' ').trim()
-  const preview = compact.length > 220 ? `${compact.slice(0, 220)}…` : compact
-  return <div className="excerpt"><p id={id} className={expanded ? '' : 'line-clamp-3'}>{expanded ? text : preview || '该来源未返回文本。'}</p>{compact.length > 80 && <button type="button" className="text-link text-sm mt-2" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(current => !current)}>{expanded ? '收起' : '展开全文'}</button>}</div>
+  const compact = plainExcerpt(text)
+  const long = compact.length > limit
+  return <div className="excerpt">
+    <p id={id} className={expanded ? '' : 'line-clamp-3'}>{expanded || !long ? compact || '该来源未返回文本。' : `${compact.slice(0, limit)}…`}</p>
+    {long && <button type="button" className="tm-textlink text-xs mt-1" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(current => !current)}>{expanded ? '收起' : '展开全文'}</button>}
+  </div>
 }
-export function CitationList({ citations, label = '引用来源', defaultOpen = false, compact = false }: { citations: Citation[]; label?: string; defaultOpen?: boolean; compact?: boolean }) {
+
+/** Original document at the cited page, in a drawer over the current page. */
+export function SourceDrawer({ source, onClose }: { source: Citation | null; onClose: () => void }) {
+  return <Drawer open={!!source} onOpenChange={open => { if (!open) onClose() }} width={640} label={source?.filename}
+    leading={<FileText size={15} aria-hidden="true" />} title={<>{source?.filename}{source?.page ? <span className="tm-faint font-normal text-xs ml-2">第 {source.page} 页</span> : null}</>}>
+    {source && <><blockquote className="source-quote">{plainExcerpt(source.text)}</blockquote><PdfViewer documentId={source.document_id} page={source.page} filename={source.filename} /></>}
+  </Drawer>
+}
+
+/** Numbered list of sources (comparison and evaluation results). */
+export function CitationList({ citations, label = '引用来源', defaultOpen = false }: { citations: Citation[]; label?: string; defaultOpen?: boolean; compact?: boolean }) {
   const [source, setSource] = useState<Citation | null>(null)
   const distinct = [...new Map(citations.map(c => [`${c.document_id}:${c.id}:${c.page}`, c])).values()]
-  return <><details className={`citations ${compact ? 'citations-compact' : ''}`} open={defaultOpen || undefined}><summary aria-label={compact ? `${label}，${distinct.length} 条` : undefined} title={compact ? `${label} · ${distinct.length} 条` : undefined}>{compact ? <><Quote size={16} aria-hidden="true" /><span>{distinct.length}</span></> : <><span className="flex items-center gap-2">{label}<span className="count-badge">{distinct.length}</span></span><ChevronDown size={15} /></>}</summary><div className="citation-list">{distinct.length === 0 ? <p className="text-sm text-slate-500 py-2">没有可验证的引用。</p> : distinct.map((citation, index) => <article key={`${citation.document_id}:${citation.id}:${citation.page}`} className="citation-item"><div className="flex items-start gap-2"><span className="citation-number">{index + 1}</span><button className="citation-source" onClick={() => setSource(citation)}><FileText size={15} className="shrink-0" /><span className="break-all">{citation.filename}</span><span className="whitespace-nowrap inline-flex items-center gap-1">{citation.page ? `第 ${citation.page} 页` : '页码未知'}<ExternalLink size={12} /></span></button></div><CitationExcerpt text={citation.text} /></article>)}</div></details><Modal open={!!source} onOpenChange={open => { if (!open) setSource(null) }} title={source?.filename ?? '来源文档'} drawer>{source && <div className="drawer-body"><blockquote className="source-quote">{source.text}</blockquote><PdfViewer documentId={source.document_id} page={source.page} filename={source.filename} /></div>}</Modal></>
+  return <>
+    <details className="citations" open={defaultOpen || undefined}>
+      <summary><span>{label}</span><span className="tm-faint tm-num">{distinct.length}</span></summary>
+      <div className="citation-list">{distinct.length === 0 ? <p className="tm-faint py-2">没有可验证的引用。</p> : distinct.map((citation, index) => <article key={`${citation.document_id}:${citation.id}:${citation.page}`} className="citation-item">
+        <div className="citation-item-head"><CiteMarker n={index + 1} /><button type="button" className="citation-source" onClick={() => setSource(citation)}>{citation.filename}</button>
+          <span className="tm-muted">{citation.page ? `第 ${citation.page} 页` : '页码未知'}</span>
+          {citation.score != null && <span className="tm-faint tm-num ml-auto text-xs">{citation.score.toFixed(3)}</span>}</div>
+        <CitationExcerpt text={citation.text} />
+      </article>)}</div>
+    </details>
+    <SourceDrawer source={source} onClose={() => setSource(null)} />
+  </>
 }
+
 export function DebugInfo({ method, timing, usage, contexts = [], modelSnapshot, trace = [], queries, config, memoriesUsed }: { method: string; timing?: Timing | null; usage?: Usage | null; contexts?: Citation[]; modelSnapshot?: PublicModelSnapshot | null; trace?: TraceStage[]; queries?: string[]; config?: RetrievalConfig | null; memoriesUsed?: number }) {
-  return <details className="debug-details"><summary>调试信息</summary><div className="result-timing"><span>方法：{methodLabel(method)}</span><span>检索 {formatNumber(timing?.retrieval_ms)} ms</span><span>生成 {formatNumber(timing?.generation_ms)} ms</span><span>{formatNumber(usage?.total_tokens)} tokens</span></div>{config && <div className="result-timing break-words"><span>流水线：{retrievalSummary(config)}</span>{!!memoriesUsed && <span>个性化记忆 {memoriesUsed} 条</span>}</div>}<RecallTrace stages={trace} queries={queries} />{modelSnapshot && <div className="result-timing break-words"><span>本轮模型：{modelSnapshot.name}</span><span>模型 ID：{modelSnapshot.model}</span><span>协议：{modelSnapshot.protocol}</span></div>}{contexts.length > 0 && <><div className="debug-score-list">{contexts.map(context => <div key={`${context.document_id}:${context.id}`}><span>{context.filename} · {context.page ? `第 ${context.page} 页` : '无页码'}</span><span>score {formatNumber(context.score)}</span></div>)}</div><CitationList citations={contexts} label="召回上下文（非引用）" /></>}</details>
+  return <details className="debug-details">
+    <summary>调试信息</summary>
+    <div className="debug-body">
+      <p className="result-timing"><span>方法：{methodLabel(method)}</span><span>检索 {formatMs(timing?.retrieval_ms)}</span><span>生成 {formatMs(timing?.generation_ms)}</span><span>{formatNumber(usage?.total_tokens)} tokens</span>{!!memoriesUsed && <span>参考记忆 {memoriesUsed} 条</span>}</p>
+      {config && <p className="result-timing break-words"><span>流水线：{retrievalSummary(config)}</span></p>}
+      {modelSnapshot && <p className="result-timing break-words"><span>本轮模型：{modelSnapshot.name}</span><span>模型 ID：{modelSnapshot.model}</span><span>协议：{modelSnapshot.protocol}</span></p>}
+      <RecallTrace stages={trace} queries={queries} config={config} />
+      {contexts.length > 0 && <CitationList citations={contexts} label="召回上下文" />}
+    </div>
+  </details>
 }
+
 export function ResultView({ result, retrievalOnly = false }: { result: RagResult; retrievalOnly?: boolean }) {
-  return <div className="space-y-4">{result.error && <Notice>{result.error}</Notice>}{result.abstain && <div className="text-sm text-amber-800 bg-amber-50 rounded p-3">证据不足，模型未给出确定回答。</div>}{result.answer ? <Markdown text={result.answer} /> : !retrievalOnly && !result.error ? <Empty title="未返回回答" description="此次调用没有生成回答文本。" /> : null}{retrievalOnly ? <CitationList citations={result.contexts ?? []} label="召回上下文" defaultOpen /> : <CitationList citations={result.citations ?? []} />}<DebugInfo method={result.method} timing={result.timing} usage={result.usage} contexts={result.contexts} trace={result.trace} queries={result.queries} config={result.retrieval_config} /></div>
+  return <div className="space-y-3">
+    {result.error && <Notice>{result.error}</Notice>}
+    {result.abstain && <Tag tone="warn">依据不足</Tag>}
+    {result.answer ? <Markdown text={result.answer} /> : !retrievalOnly && !result.error ? <Empty title="未返回回答" /> : null}
+    {retrievalOnly ? <CitationList citations={result.contexts ?? []} label="召回上下文" defaultOpen /> : <CitationList citations={result.citations ?? []} />}
+    <DebugInfo method={result.method} timing={result.timing} usage={result.usage} contexts={result.contexts} trace={result.trace} queries={result.queries} config={result.retrieval_config} />
+  </div>
 }

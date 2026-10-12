@@ -1,0 +1,70 @@
+/* PDF reader (document page and the chat source drawer) */
+.pdf-viewer { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #E4E7E2; border: 0; border-radius: 0; overflow: hidden; }
+.pdf-toolbar { flex: 0 0 48px; height: 48px; display: flex; align-items: center; gap: 6px; padding: 0 16px; background: var(--tm-surface); border-bottom: 1px solid var(--tm-line); overflow-x: auto; }
+.pdf-toolbar input.tm-pg { width: 44px; }
+.pdf-toolbar-sep { width: 1px; height: 20px; background: var(--tm-line); margin: 0 6px; flex: 0 0 auto; }
+.pdf-zoom { min-width: 44px; text-align: center; }
+.pdf-stage { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: auto; }
+.pdf-pad { padding: 24px; min-width: 100%; width: max-content; }
+.pdf-sheet { position: relative; width: max-content; margin: 0 auto; box-shadow: 0 1px 2px rgba(24, 32, 29, .14); }
+.pdf-hl { position: absolute; inset: 0; border: 1.5px solid #C9A920; background: rgba(242, 211, 78, .10); border-radius: 2px; pointer-events: none; }
+.pdf-hl-label { position: absolute; right: 0; top: -20px; background: var(--tm-cite-on); color: var(--tm-cite-on-text); font-size: 11px; font-weight: 600; line-height: 1; padding: 4px 6px; border-radius: 3px 3px 0 0; pointer-events: none; }
+.pdf-status { position: absolute; left: 0; right: 0; top: 0; z-index: 10; padding: 10px 16px; background: rgba(255, 255, 255, .95); color: var(--tm-muted); }
+.pdf-error { margin: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; background: var(--tm-surface); border: 1px solid var(--tm-line); border-radius: 6px; }
+.drawer-body .pdf-viewer { margin: 0 14px 14px; width: auto; border-radius: 6px; min-height: 320px; }
+
+/* Knowledge list and detail */
+.kb-name { display: block; font-weight: 600; color: var(--tm-ink); }
+.kb-name:hover { text-decoration: underline; color: var(--tm-ink); }
+.kb-sub { display: block; margin-top: 1px; font-size: 12px; color: var(--tm-faint); font-weight: 400; }
+.kb-sub-clip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-sub-err { color: var(--tm-danger); }
+.kb-sub-run { color: var(--tm-tag-run); }
+.kb-sub-warn { color: var(--tm-tag-warn); }
+.kb-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.kb-filters .tm-search { flex: 0 1 320px; min-width: 200px; }
+.kb-summary { margin-left: auto; font-size: 13px; color: var(--tm-muted); font-variant-numeric: tabular-nums; }
+.kb-section-title { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 16px; border-bottom: 1px solid var(--tm-line-soft); }
+.kb-section-title h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.kb-section-title .tm-seg { margin-left: auto; }
+.tm-panel .tm-table-wrap { border-radius: 0 0 6px 6px; }
+.kb-file { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+.kb-file-name { font-weight: 500; color: var(--tm-ink); overflow-wrap: anywhere; }
+.kb-file-name:hover { color: var(--tm-ink); text-decoration: underline; }
+.kb-config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px 24px; padding: 16px; margin: 0; }
+.kb-config-grid dt { font-size: 12px; color: var(--tm-faint); }
+.kb-config-grid dd { margin: 2px 0 0; font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kb-dialog-files { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.kb-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 140px; border: 1px dashed var(--tm-control); border-radius: 6px; background: var(--tm-surface-2); padding: 16px; text-align: center; color: var(--tm-muted); }
+.kb-dropzone[data-dragging="true"] { border-color: var(--tm-pine); background: var(--tm-pine-tint); }
+
+/* Document page */
+.doc-split { height: calc(100dvh - var(--tm-bar-h)); min-height: 480px; display: flex; min-width: 0; }
+.doc-original { flex: 1 1 560px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--tm-line); }
+.doc-original > .pdf-viewer, .doc-original > .doc-text { flex: 1; min-height: 0; }
+.doc-text { overflow: auto; padding: 20px 24px; background: var(--tm-surface); }
+.doc-side { flex: 1 1 480px; max-width: 560px; min-width: 0; min-height: 0; background: var(--tm-surface); display: flex; flex-direction: column; }
+.doc-side .tm-tabs { padding: 0 20px; flex: 0 0 auto; }
+.doc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px; }
+.doc-tools .tm-search { flex: 1; min-width: 200px; }
+.doc-follow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--tm-muted); white-space: nowrap; }
+.doc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 20px; }
+.chunk-card { display: block; width: 100%; text-align: left; border: 1px solid transparent; border-bottom-color: var(--tm-line-soft); border-radius: 0; background: var(--tm-surface); color: inherit; padding: 12px 14px; cursor: pointer; }
+.chunk-card:hover { background: var(--tm-surface-2); }
+.chunk-card.tm-ev-card, .chunk-card.tm-ev-card:hover { border-radius: 4px; background: var(--tm-ev-card); border-color: var(--tm-ev-card-line); }
+.chunk-head { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+.chunk-body { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.65; color: var(--tm-text-2); overflow-wrap: anywhere; }
+.chunk-on { margin-left: auto; color: #6B5200; font-weight: 500; }
+.doc-pager { border-top: 1px solid var(--tm-line-soft); }
+@media (max-width: 1023px) { .doc-split { height: auto; flex-wrap: wrap; } .doc-side { max-width: none; flex-basis: 100%; height: 80dvh; } .doc-original { border-right: 0; border-bottom: 1px solid var(--tm-line); flex-basis: 100%; height: 75dvh; } }
+
+/* Selection bar (shared by knowledge documents and memories) */
+.tm-selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 6px 12px 6px 16px; border-radius: 6px; background: var(--tm-ink); color: #fff; }
+.tm-selbar .tm-btn { background: transparent; border-color: rgba(255, 255, 255, .4); color: #fff; }
+.tm-selbar .tm-btn:hover { background: rgba(255, 255, 255, .12); }
+.tm-selbar .tm-btn-primary { background: #fff; border-color: #fff; color: var(--tm-ink); }
+.tm-selbar .tm-btn-primary:hover { background: #E8EBE6; }
+.tm-selbar .tm-btn:disabled { background: transparent; border-color: rgba(255, 255, 255, .2); color: rgba(255, 255, 255, .45); }
+
+/* Visually-hidden table headers are absolutely positioned: keep them inside the scrolling wrapper. */
+.tm-table-wrap { position: relative; }

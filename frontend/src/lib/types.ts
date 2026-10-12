@@ -19,7 +19,7 @@ export interface RetrievalConfig { routes: ('vector' | 'bm25')[]; route_k: numbe
 export const DEFAULT_RETRIEVAL: RetrievalConfig = { routes: ['vector', 'bm25'], route_k: 20, bm25_weight: 1, vector_weight: 1, rrf_k: 60, fusion_k: 20, rerank: true, query_rewrite: 'none', rewrite_count: 3, min_score: null, dedupe_threshold: 1, mmr_lambda: null, neighbor_window: 0, top_k: 5 }
 export interface TraceCandidate { rank: number; id: string; document_id: string; filename: string; page: number | null; score: number }
 export interface TraceStage { stage: string; ms: number; count?: number; candidates?: TraceCandidate[]; query?: string; queries?: string[]; [key: string]: unknown }
-export interface RetrievalTrace { config: RetrievalConfig | null; queries: string[]; stages: TraceStage[]; memories_used?: number }
+export interface RetrievalTrace { config: RetrievalConfig | null; queries: string[]; stages: TraceStage[] }
 export interface RagResult { answer: string; citations: Citation[]; contexts: Citation[]; abstain: boolean; method: Method | 'custom'; timing: Timing; usage: Usage; error?: string; trace?: TraceStage[]; queries?: string[]; retrieval_config?: RetrievalConfig | null }
 export interface Conversation { id: string; title: string; knowledge_base_id: string; created_at: string }
 export interface Message { model_profile_id?: string | null; model_snapshot?: PublicModelSnapshot | null; id: string; conversation_id: string; role: 'user' | 'assistant'; content: string; status: string; stage: string; error: string | null; citations: Citation[]; contexts: Citation[]; method: Method; timing: Timing | null; usage: Usage | null; retrieval_trace?: RetrievalTrace | null; created_at: string }
@@ -59,7 +59,7 @@ export interface Account { id: string; username: string; display_name: string; r
 export interface UserAccount { id: string; username: string; display_name: string; role: Role; status: 'active' | 'disabled'; must_change_password: boolean; last_login_at: string | null; created_at: string; temporary_password?: string }
 export interface ApiToken { id: string; name: string; prefix?: string; last_used_at: string | null; expires_at: string | null; revoked_at: string | null; created_at: string; token?: string }
 export interface PendingDocument extends Document { knowledge_base_name: string; uploader: { username: string; display_name: string } }
-export interface Reviews { documents: PendingDocument[]; memories: Memory[] }
+export interface Reviews { documents: PendingDocument[] }
 export interface QueryLog { id: string; user_id: string | null; username: string; source: 'chat' | 'debug' | 'mcp'; action: string; knowledge_base_id: string | null; knowledge_base_name: string; kb_scope: Scope; query: string | null; query_chars: number; method: string; result_count: number; latency_ms: number; status: 'ok' | 'error'; error: string | null; created_at: string }
 export interface McpCallLog { id: string; user_id: string | null; username: string; token_id: string | null; transport: 'http' | 'stdio'; tool: string; arguments: Record<string, unknown>; status: 'ok' | 'error'; error: string | null; latency_ms: number; created_at: string }
 export interface Page<T> { total: number; items: T[]; limit: number; offset: number }

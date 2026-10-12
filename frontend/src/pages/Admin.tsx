@@ -1,30 +1,38 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, Copy, KeyRound, Plus, Search, X } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Copy, Plus, Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatDate, formatNumber, patch, post, useAction, useApi } from '../lib/api'
+import { errorText, patch, post, useAction, useApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
-import { memoryCategoryLabel } from '../lib/types'
-import type { McpCallLog, Page, QueryLog, Reviews, Role, UserAccount } from '../lib/types'
-import { Button, Empty, ErrorState, Field, JsonDetails, Loading, Modal, Notice, PageHeader, Status } from '../components/ui'
-import { Select } from '../components/Select'
+import type { PendingDocument, Role, UserAccount } from '../lib/types'
+import { Button, DataTable, Drawer, Empty, ErrorState, FactList, Loading, Modal, Pager, ScopeTag, SearchableSelect, Segmented, StatusTag, Tag, buttonClass, type Column } from '../components/ui'
+import { FormField } from '../components/ConfigurationControls'
+import { AdminSide } from '../components/shell/ModuleNav'
+import { Page } from '../components/shell/Shell'
+import { Markdown } from '../components/sources'
+import { PdfCanvas } from '../components/PdfCanvas'
+import { TIME_RANGE_OPTIONS, formatStamp, personName, roleLabel, useRangeStart, useUserChoices, type PersonRef, type TimeRange } from './adminShared'
 
-type Section = 'users' | 'reviews' | 'query-logs' | 'mcp-logs'
+const PAGE_SIZES = [20, 50, 100]
+const SOURCE_LABEL: Record<string, string> = { markdown: 'Markdown', text: '文本', pdf: 'PDF' }
+const formatLabel = (doc: PendingDocument): string => SOURCE_LABEL[doc.source_type ?? ''] ?? (/\.pdf$/i.test(doc.filename) ? 'PDF' : /\.(md|markdown)$/i.test(doc.filename) ? 'Markdown' : '文本')
+const sizeLabel = (doc: PendingDocument): string => `${formatLabel(doc)}${doc.page_count ? `，${doc.page_count} 页` : ''}`
 
-function AdminNav({ current }: { current: Section }) {
-  const count = useApi<{ total: number }>('/admin/reviews/count', { poll: 30000 })
-  const tabs: { value: Section; label: string }[] = [
-    { value: 'reviews', label: `待审批${count.data?.total ? ` ${count.data.total}` : ''}` },
-    { value: 'users', label: '员工账号' }, { value: 'query-logs', label: '查询日志' }, { value: 'mcp-logs', label: 'MCP 调用日志' },
-  ]
-  return <nav className="tabs mb-6" aria-label="管理工作区">{tabs.map(tab =>
-    <Link key={tab.value} className={`tab ${current === tab.value ? 'tab-active' : ''}`} aria-current={current === tab.value ? 'page' : undefined} to={`/admin/${tab.value}`}>{tab.label}</Link>
-  )}</nav>
-}
+// ------------------------------------------------------------------ accounts
 
 function TemporaryPassword({ account, onClose }: { account: UserAccount | null; onClose: () => void }) {
-  return <Modal open={account !== null} onOpenChange={value => { if (!value) onClose() }} title="临时密码" description={`账号 ${account?.username ?? ''} 首次登录后必须修改密码。`}><div className="dialog-body space-y-4"><Notice>临时密码只显示这一次，请通过安全渠道交给员工。</Notice><code className="secret-box" data-testid="temporary-password">{account?.temporary_password}</code><div className="dialog-actions"><Button variant="secondary" onClick={() => { void navigator.clipboard.writeText(account?.temporary_password ?? '').then(() => toast.success('已复制')) }}><Copy size={15} />复制</Button><Button onClick={onClose}>完成</Button></div></div></Modal>
+  return <Modal open={account !== null} onOpenChange={value => { if (!value) onClose() }} title="临时密码" description={`账号 ${account?.username ?? ''} 首次登录后必须修改密码。`}>
+    <div className="dialog-body space-y-4">
+      <p className="tm-note m-0">临时密码只显示这一次，请通过安全渠道交给员工。</p>
+      <code className="ad-secret" data-testid="temporary-password">{account?.temporary_password}</code>
+      <div className="dialog-actions">
+        <Button variant="secondary" onClick={() => { void navigator.clipboard.writeText(account?.temporary_password ?? '').then(() => toast.success('已复制'), () => toast.error('复制失败，请手动选择文本')) }}><Copy size={14} />复制</Button>
+        <Button onClick={onClose}>完成</Button>
+      </div>
+    </div>
+  </Modal>
 }
 
 export function UsersPage() {
@@ -33,78 +41,292 @@ export function UsersPage() {
   const [open, setOpen] = useState(false)
   const [role, setRole] = useState<Role>('employee')
   const [issued, setIssued] = useState<UserAccount | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0])
   const create = useAction((body: { username: string; display_name: string; role: Role }) => post<UserAccount>('/admin/users', body), { invalidate: ['/admin/users'], onSuccess: account => { setOpen(false); setIssued(account) } })
   const update = useAction(({ id, ...body }: { id: string; role?: Role; status?: 'active' | 'disabled' }) => patch<UserAccount>(`/admin/users/${id}`, body), { invalidate: ['/admin/users'], success: '账号已更新' })
   const reset = useAction((id: string) => post<UserAccount>(`/admin/users/${id}/reset-password`), { invalidate: ['/admin/users'], onSuccess: account => setIssued(account) })
   function submit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault(); const form = new FormData(event.currentTarget)
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
     create.mutate({ username: String(form.get('username')).trim(), display_name: String(form.get('display_name')).trim(), role })
   }
-  return <div className="page"><PageHeader title="管理" description="员工账号、内容审批与审计日志。" actions={<Button onClick={() => setOpen(true)}><Plus size={16} />新建账号</Button>} /><AdminNav current="users" />
-    {users.isPending ? <Loading /> : users.isError ? <ErrorState error={users.error} retry={() => { void users.refetch() }} /> : <div className="table-wrap"><table><thead><tr><th>账号</th><th>角色</th><th>状态</th><th>最近登录</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{users.data.map(account => {
-      const self = account.id === me?.id
-      return <tr key={account.id}><td><span className="font-medium">{account.display_name || account.username}</span><span className="ml-2 text-xs text-slate-500">{account.username}{self ? '（我）' : ''}</span>{account.must_change_password && <p className="text-xs text-amber-700 mt-1">等待首次修改密码</p>}</td>
-        <td>{account.role === 'admin' ? '管理员' : '员工'}</td><td><Status value={account.status} /></td><td className="whitespace-nowrap">{formatDate(account.last_login_at ?? undefined)}</td>
-        <td><span className="inline-flex flex-wrap gap-3">{!self && <>
-          <button type="button" className="text-link" disabled={update.isPending} onClick={() => update.mutate({ id: account.id, role: account.role === 'admin' ? 'employee' : 'admin' })}>{account.role === 'admin' ? '设为员工' : '设为管理员'}</button>
-          <button type="button" className="text-link" disabled={update.isPending} onClick={() => { if (account.status === 'active' && !window.confirm(`停用 ${account.username}？该账号将立即退出登录，令牌失效。`)) return; update.mutate({ id: account.id, status: account.status === 'active' ? 'disabled' : 'active' }) }}>{account.status === 'active' ? '停用' : '启用'}</button>
-          <button type="button" className="text-link inline-flex items-center gap-1" disabled={reset.isPending} onClick={() => { if (window.confirm(`为 ${account.username} 生成新的临时密码？`)) reset.mutate(account.id) }}><KeyRound size={13} />重置密码</button>
-        </>}</span></td></tr>
-    })}</tbody></table></div>}
-    <Modal open={open} onOpenChange={value => { if (!create.isPending) setOpen(value) }} title="新建账号" description="系统生成临时密码，员工首次登录时设置自己的密码。"><form className="dialog-body space-y-5" onSubmit={submit}><Field label="用户名" hint="3-64 位小写字母、数字或 _ . -"><input name="username" required minLength={3} maxLength={64} autoFocus /></Field><Field label="显示名"><input name="display_name" maxLength={100} /></Field><Field label="角色"><Select label="角色" value={role} onChange={value => setRole(value as Role)} options={[{ value: 'employee', label: '员工' }, { value: 'admin', label: '管理员' }]} /></Field>{create.error && <ErrorState error={create.error} />}<div className="dialog-actions"><Button variant="secondary" onClick={() => setOpen(false)} disabled={create.isPending}>取消</Button><Button type="submit" busy={create.isPending}>创建账号</Button></div></form></Modal>
+  const rows = users.data ?? []
+  const shown = rows.slice((page - 1) * pageSize, page * pageSize)
+
+  const columns: Column<UserAccount>[] = [
+    { key: 'account', header: '账号', cell: account => <>
+      <span className="font-medium">{account.display_name || account.username}</span>
+      <span className="ml-2 tm-faint text-xs">{account.username}{account.id === me?.id ? '（我）' : ''}</span>
+      {account.must_change_password && <span className="tm-table-sub" style={{ color: 'var(--tm-tag-warn)' }}>等待首次修改密码</span>}
+    </> },
+    { key: 'role', header: '角色', cell: account => account.role === 'admin' ? <Tag tone="ink">管理员</Tag> : <Tag>员工</Tag>, nowrap: true },
+    { key: 'status', header: '状态', cell: account => <StatusTag value={account.status} />, nowrap: true },
+    { key: 'login', header: '最近登录', cell: account => <span className="tm-muted tm-num">{formatStamp(account.last_login_at)}</span>, nowrap: true },
+    { key: 'created', header: '创建', cell: account => <span className="tm-muted tm-num">{formatStamp(account.created_at)}</span>, nowrap: true },
+    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: account => account.id === me?.id ? null : <span className="inline-flex gap-4">
+      <button type="button" className="tm-textlink" disabled={update.isPending} onClick={() => update.mutate({ id: account.id, role: account.role === 'admin' ? 'employee' : 'admin' })}>{account.role === 'admin' ? '设为员工' : '设为管理员'}</button>
+      <button type="button" className="tm-textlink" disabled={update.isPending} onClick={() => { if (account.status === 'active' && !window.confirm(`停用 ${account.username}？该账号将立即退出登录，令牌失效。`)) return; update.mutate({ id: account.id, status: account.status === 'active' ? 'disabled' : 'active' }) }}>{account.status === 'active' ? '停用' : '启用'}</button>
+      <button type="button" className="tm-textlink" disabled={reset.isPending} onClick={() => { if (window.confirm(`为 ${account.username} 生成新的临时密码？`)) reset.mutate(account.id) }}>重置密码</button>
+    </span> },
+  ]
+
+  return <Page side={<AdminSide />} title="员工账号" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建账号</Button>}>
+    {users.isPending ? <Loading /> : users.isError ? <ErrorState error={users.error} retry={() => { void users.refetch() }} />
+      : <section className="tm-panel ad-panel" aria-label="员工账号">
+        <DataTable label="员工账号" columns={columns} rows={shown} rowKey={account => account.id} minWidth={720} rowProps={account => ({ dim: account.status === 'disabled' })} />
+        <Pager total={rows.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizes={PAGE_SIZES} unit="个" />
+      </section>}
+    <Modal open={open} onOpenChange={value => { if (!create.isPending) setOpen(value) }} title="新建账号" description="系统生成临时密码，员工首次登录时设置自己的密码。">
+      <form className="dialog-body ad-form" onSubmit={submit}>
+        <FormField label="用户名" caption="3-64 位小写字母、数字或 _ . -"><input className="tm-input" name="username" required minLength={3} maxLength={64} autoFocus /></FormField>
+        <FormField label="显示名"><input className="tm-input" name="display_name" maxLength={100} /></FormField>
+        <div className="tm-field"><span className="tm-field-label">角色</span><Segmented label="角色" value={role} onChange={setRole} items={[{ value: 'employee', label: '员工' }, { value: 'admin', label: '管理员' }]} /></div>
+        {create.error && <ErrorState error={create.error} />}
+        <div className="dialog-actions"><Button variant="secondary" onClick={() => setOpen(false)} disabled={create.isPending}>取消</Button><Button type="submit" busy={create.isPending}>创建账号</Button></div>
+      </form>
+    </Modal>
     <TemporaryPassword account={issued} onClose={() => setIssued(null)} />
-  </div>
+  </Page>
 }
+
+// ------------------------------------------------------------------ approvals: shared pieces
+
+interface ReviewedDocument extends PendingDocument { result: 'approved' | 'rejected'; reviewer: PersonRef }
+interface ReviewHistory { total: number; items: ReviewedDocument[]; limit: number; offset: number; counts: { all: number; approved: number; rejected: number } }
+
+const TypeTag = () => <Tag tone="run">文档</Tag>
+function Destination({ doc }: { doc: PendingDocument }) {
+  return <span className="inline-flex items-center gap-1.5">{doc.knowledge_base_name}<ScopeTag scope="platform" /></span>
+}
+function Applicant({ person, role }: { person: PersonRef; role?: Role }) {
+  return <span>{personName(person)}{role && <span className="tm-faint text-xs ml-1.5">{roleLabel(role)}</span>}</span>
+}
+
+/** The uploaded file as the reviewer will see it: Markdown and text rendered, a PDF on its first page. */
+function SourcePreview({ doc }: { doc: PendingDocument }) {
+  const pdf = doc.source_type === 'pdf' || /\.pdf$/i.test(doc.filename)
+  const markdown = doc.source_type === 'markdown' || /\.(md|markdown)$/i.test(doc.filename)
+  const [text, setText] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (pdf) return
+    const controller = new AbortController()
+    setText(null); setFailed(false)
+    fetch(`/api/documents/${encodeURIComponent(doc.id)}/file`, { signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error(String(response.status)); return response.text() })
+      .then(setText)
+      .catch(() => { if (!controller.signal.aborted) setFailed(true) })
+    return () => controller.abort()
+  }, [doc.id, pdf])
+  return <section aria-label="原文预览" className="ad-preview-block">
+    <h3 className="ad-subtitle">原文预览</h3>
+    {pdf ? <div className="ad-preview-pdf"><PdfCanvas documentId={doc.id} page={1} filename={doc.filename} showOpenLink={false} /></div>
+      : <div className="ad-preview">{failed ? <p className="tm-muted m-0">原文加载失败，请稍后重试。</p> : text === null ? <p className="tm-faint m-0">正在加载原文…</p>
+        : markdown ? <Markdown text={text} /> : <pre className="ad-plain">{text}</pre>}</div>}
+  </section>
+}
+
+function useRefreshReviews() {
+  const client = useQueryClient()
+  return () => { void client.invalidateQueries({ predicate: query => String(query.queryKey[0]).startsWith('/admin/reviews') }) }
+}
+
+// ------------------------------------------------------------------ approvals: pending
 
 export function ReviewsPage() {
-  const reviews = useApi<Reviews>('/admin/reviews', { poll: 15000 })
-  const invalidate = ['/admin/reviews', '/admin/reviews/count']
-  const decideDocument = useAction(({ id, approve }: { id: string; approve: boolean }) => post(`/admin/reviews/documents/${id}`, { approve, note: approve ? '' : window.prompt('驳回原因（可选）') ?? '' }), { invalidate, success: '已处理' })
-  const decideMemory = useAction(({ id, approve }: { id: string; approve: boolean }) => post(`/admin/reviews/memories/${id}`, { approve }), { invalidate, success: '已处理' })
-  const actions = (busy: boolean, decide: (approve: boolean) => void, label: string) => <span className="inline-flex gap-2"><Button variant="secondary" disabled={busy} aria-label={`通过 ${label}`} onClick={() => decide(true)}><Check size={14} />通过</Button><Button variant="ghost" disabled={busy} aria-label={`驳回 ${label}`} onClick={() => decide(false)}><X size={14} />驳回</Button></span>
-  return <div className="page"><PageHeader title="管理" description="员工账号、内容审批与审计日志。" /><AdminNav current="reviews" />
-    {reviews.isPending ? <Loading /> : reviews.isError ? <ErrorState error={reviews.error} retry={() => { void reviews.refetch() }} /> : <>
-      <div className="section-heading"><h2>平台知识库文档<span className="ml-2 text-slate-400 font-normal">{reviews.data.documents.length}</span></h2></div>
-      {!reviews.data.documents.length ? <Empty title="没有待审批文档" description="员工向平台知识库上传的文档会出现在这里，通过后才会解析入库。" /> : <div className="table-wrap"><table><thead><tr><th>文档</th><th>知识库</th><th>上传者</th><th>上传时间</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{reviews.data.documents.map(doc => <tr key={doc.id}><td><Link className="text-link" to={`/knowledge/${doc.knowledge_base_id}/documents/${doc.id}`}>{doc.filename}</Link><span className="ml-2 text-xs text-slate-500">{doc.page_count ? `${doc.page_count} 页` : doc.source_type}</span></td><td>{doc.knowledge_base_name}</td><td>{doc.uploader.display_name || doc.uploader.username || '—'}</td><td className="whitespace-nowrap">{formatDate(doc.created_at)}</td><td>{actions(decideDocument.isPending, approve => decideDocument.mutate({ id: doc.id, approve }), doc.filename)}</td></tr>)}</tbody></table></div>}
-      <div className="section-heading mt-8"><h2>平台记忆提议<span className="ml-2 text-slate-400 font-normal">{reviews.data.memories.length}</span></h2></div>
-      {!reviews.data.memories.length ? <Empty title="没有待审批记忆" description="员工提交的平台记忆通过后对所有人生效，并用于个性化回答。" /> : <div className="table-wrap"><table><thead><tr><th>内容</th><th>类别</th><th>提议人</th><th>时间</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{reviews.data.memories.map(memory => <tr key={memory.id}><td className="max-w-xl break-words">{memory.content}</td><td>{memoryCategoryLabel(memory.category)}</td><td>{memory.author || '—'}</td><td className="whitespace-nowrap">{formatDate(memory.created_at)}</td><td>{actions(decideMemory.isPending, approve => decideMemory.mutate({ id: memory.id, approve }), memory.content.slice(0, 20))}</td></tr>)}</tbody></table></div>}
-    </>}
-  </div>
-}
-
-const PAGE = 50
-function Pager({ total, offset, onChange }: { total: number; offset: number; onChange: (offset: number) => void }) {
-  if (total <= PAGE) return null
-  return <div className="flex items-center justify-end gap-3 mt-4 text-sm text-slate-500"><span>{offset + 1}-{Math.min(offset + PAGE, total)} / {total}</span><Button variant="secondary" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - PAGE))}>上一页</Button><Button variant="secondary" disabled={offset + PAGE >= total} onClick={() => onChange(offset + PAGE)}>下一页</Button></div>
-}
-const SOURCE: Record<string, string> = { chat: '问答', debug: '检索对比', mcp: 'MCP' }
-
-export function QueryLogsPage() {
-  const [scope, setScope] = useState('all')
-  const [source, setSource] = useState('all')
+  const reviews = useApi<{ documents: PendingDocument[] }>('/admin/reviews', { poll: 15000 })
+  const { users } = useUserChoices()
+  const refresh = useRefreshReviews()
   const [text, setText] = useState('')
-  const [q, setQ] = useState('')
-  const [offset, setOffset] = useState(0)
-  const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) })
-  if (scope !== 'all') params.set('kb_scope', scope); if (source !== 'all') params.set('source', source); if (q) params.set('q', q)
-  const logs = useApi<Page<QueryLog>>(`/admin/query-logs?${params.toString()}`, { poll: 15000 })
-  return <div className="page page-wide"><PageHeader title="管理" description="员工账号、内容审批与审计日志。" /><AdminNav current="query-logs" />
-    <Notice>平台知识库的查询记录完整问题；个人知识库只记录元数据（谁、何时、哪个库、字数、耗时），不记录问题内容。</Notice>
-    <form className="toolbar mt-4" onSubmit={event => { event.preventDefault(); setOffset(0); setQ(text.trim()) }}><div className="search-field"><Search size={16} /><input aria-label="搜索问题" value={text} onChange={event => setText(event.target.value)} placeholder="搜索平台问题文本…" /></div><Select className="filter-select" label="知识库范围" value={scope} onChange={value => { setScope(value); setOffset(0) }} options={[{ value: 'all', label: '全部范围' }, { value: 'platform', label: '平台知识库' }, { value: 'personal', label: '个人知识库' }]} /><Select className="filter-select" label="来源" value={source} onChange={value => { setSource(value); setOffset(0) }} options={[{ value: 'all', label: '全部来源' }, { value: 'chat', label: '问答' }, { value: 'mcp', label: 'MCP' }, { value: 'debug', label: '检索对比' }]} /></form>
-    {logs.isPending ? <Loading /> : logs.isError ? <ErrorState error={logs.error} retry={() => { void logs.refetch() }} /> : !logs.data.items.length ? <Empty title="暂无查询记录" description="问答、检索对比和 MCP 检索都会记录在这里。" /> : <><div className="table-wrap"><table><thead><tr><th>时间</th><th>用户</th><th>来源</th><th>知识库</th><th>问题</th><th>结果</th><th>耗时</th></tr></thead><tbody>{logs.data.items.map(row => <tr key={row.id}><td className="whitespace-nowrap">{formatDate(row.created_at)}</td><td>{row.username || '—'}</td><td>{SOURCE[row.source] ?? row.source}</td><td>{row.knowledge_base_name || row.knowledge_base_id}<span className="ml-1 text-xs text-slate-500">{row.kb_scope === 'personal' ? '个人' : '平台'}</span></td><td className="max-w-md break-words">{row.query ?? <span className="text-slate-400">（个人库，未记录内容 · {row.query_chars} 字）</span>}{row.error && <p className="text-xs text-red-700 mt-1">{row.error}</p>}</td><td className="tabular-nums">{row.status === 'error' ? <Status value="error" /> : formatNumber(row.result_count)}</td><td className="tabular-nums whitespace-nowrap">{formatNumber(row.latency_ms)} ms</td></tr>)}</tbody></table></div><Pager total={logs.data.total} offset={offset} onChange={setOffset} /></>}
-  </div>
+  const [applicant, setApplicant] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0])
+  const reasonBox = useRef<HTMLTextAreaElement>(null)
+
+  const all = useMemo(() => reviews.data?.documents ?? [], [reviews.data])
+  const roles = useMemo(() => new Map(users.map(user => [user.username, user.role])), [users])
+  const applicants = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const doc of all) seen.set(doc.uploader.username, personName(doc.uploader))
+    return [{ value: '', label: '全部' }, ...[...seen].map(([value, label]) => ({ value, label, hint: label === value ? undefined : value }))]
+  }, [all])
+  const visible = useMemo(() => {
+    const needle = text.trim().toLowerCase()
+    return all.filter(doc => (!needle || doc.filename.toLowerCase().includes(needle)) && (!applicant || doc.uploader.username === applicant))
+  }, [all, text, applicant])
+  const shown = visible.slice((page - 1) * pageSize, page * pageSize)
+  const index = visible.findIndex(doc => doc.id === openId)
+  const current = index >= 0 ? visible[index] : null
+
+  useEffect(() => {
+    if (!rejecting || !current) return
+    const timer = window.setTimeout(() => reasonBox.current?.focus(), 40)
+    return () => window.clearTimeout(timer)
+  }, [rejecting, current])
+
+  function open(id: string, intent = false): void { setOpenId(id); setReason(''); setRejecting(intent) }
+  function close(): void { setOpenId(null); setRejecting(false) }
+  function step(offset: number): void {
+    if (!visible.length) return
+    open(visible[(Math.max(index, 0) + offset + visible.length) % visible.length].id)
+  }
+
+  const decide = useAction(({ id, approve, note }: { id: string; approve: boolean; note: string }) => post(`/admin/reviews/documents/${id}`, { approve, note: approve ? '' : note }), {
+    onSuccess: (_, { id, approve }) => {
+      toast.success(approve ? '已通过' : '已驳回')
+      refresh()
+      setSelected(previous => { const next = new Set(previous); next.delete(id); return next })
+      if (openId === id) {
+        const at = visible.findIndex(doc => doc.id === id)
+        const next = visible[at + 1] ?? visible[at - 1]
+        if (next) open(next.id); else close()
+      }
+    },
+  })
+  const approveMany = useAction(async (ids: string[]) => {
+    const results = await Promise.allSettled(ids.map(id => post(`/admin/reviews/documents/${id}`, { approve: true, note: '' })))
+    const failed = results.filter(result => result.status === 'rejected')
+    if (failed.length) throw new Error(`${failed.length} 份文档未能通过：${errorText((failed[0] as PromiseRejectedResult).reason)}`)
+    return ids.length
+  }, { onSuccess: count => { toast.success(`已通过 ${count} 份文档`); setSelected(new Set()) } })
+  const busy = decide.isPending || approveMany.isPending
+
+  const columns: Column<PendingDocument>[] = [
+    { key: 'type', header: '类型', cell: TypeTag, nowrap: true },
+    { key: 'name', header: '文档名', cell: doc => <button type="button" className="tm-linkbtn" onClick={() => open(doc.id)}>{doc.filename}</button> },
+    { key: 'kb', header: '提交到', cell: doc => <Destination doc={doc} />, nowrap: true },
+    { key: 'who', header: '申请人', cell: doc => <Applicant person={doc.uploader} role={roles.get(doc.uploader.username)} />, nowrap: true },
+    { key: 'at', header: '申请时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.created_at)}</span>, nowrap: true },
+    { key: 'size', header: '大小', cell: doc => <span className="tm-muted">{sizeLabel(doc)}</span>, nowrap: true },
+    { key: 'status', header: '状态', cell: doc => <StatusTag value={doc.review_status ?? 'pending'} />, nowrap: true },
+    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: doc => <span className="inline-flex gap-1.5">
+      <Button variant="secondary" size="sm" disabled={busy} aria-label={`通过 ${doc.filename}`} onClick={() => decide.mutate({ id: doc.id, approve: true, note: '' })}>通过</Button>
+      <Button variant="danger" size="sm" disabled={busy} aria-label={`驳回 ${doc.filename}`} onClick={() => open(doc.id, true)}>驳回</Button>
+    </span> },
+  ]
+
+  return <Page side={<AdminSide />} title="待审批">
+    {reviews.isPending ? <Loading /> : reviews.isError ? <ErrorState error={reviews.error} retry={() => { void reviews.refetch() }} /> : <>
+      <div className="ad-filters">
+        <label className="tm-search ad-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文档名" placeholder="搜索文件名" value={text} onChange={event => { setText(event.target.value); setPage(1) }} /></label>
+        <SearchableSelect label="申请人" options={applicants} value={applicant} onChange={value => { setApplicant(value); setPage(1) }} />
+        <span className="flex-1" />
+        <Button variant="secondary" disabled={!selected.size || busy} busy={approveMany.isPending} onClick={() => approveMany.mutate([...selected])}>批量通过{selected.size ? ` ${selected.size}` : ''}</Button>
+      </div>
+      <section className="tm-panel ad-panel" aria-label="待审批文档">
+        <DataTable label="待审批文档" columns={columns} rows={shown} rowKey={doc => doc.id} minWidth={980} selectedKey={openId} onRowClick={doc => open(doc.id)}
+          selection={{ selected, onChange: setSelected, label: key => all.find(doc => doc.id === key)?.filename ?? key }}
+          empty={all.length ? '没有符合条件的文档' : '没有待审批文档'} />
+        <Pager total={visible.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizes={PAGE_SIZES} unit="项" />
+      </section>
+    </>}
+    <Drawer open={!!current} onOpenChange={value => { if (!value) close() }} width={520} label={current?.filename}
+      leading={<TypeTag />} title={current?.filename} position={current ? `${index + 1} / ${visible.length}` : undefined}
+      onPrev={visible.length > 1 ? () => step(-1) : undefined} onNext={visible.length > 1 ? () => step(1) : undefined}
+      footer={current && <>
+        <label className="tm-field-label" htmlFor="review-note">驳回原因（可选，申请人能看到）</label>
+        <textarea id="review-note" ref={reasonBox} className="tm-input" rows={2} maxLength={1000} placeholder="例如：内容与现行制度重复，请合并后重新提交" value={reason} onChange={event => setReason(event.target.value)} />
+        <div className="ad-foot-actions">
+          <Button variant="danger" disabled={busy} onClick={() => decide.mutate({ id: current.id, approve: false, note: reason.trim() })}>驳回并删除原文件</Button>
+          <Button disabled={busy} busy={decide.isPending} onClick={() => decide.mutate({ id: current.id, approve: true, note: '' })}>通过并开始解析</Button>
+        </div>
+      </>}>
+      {current && <>
+        <FactList items={[
+          { label: '提交到', value: `${current.knowledge_base_name}（平台）` },
+          { label: '申请人', value: `${personName(current.uploader)}，${roleLabel(roles.get(current.uploader.username))}` },
+          { label: '格式', value: sizeLabel(current) },
+          { label: '申请时间', value: formatStamp(current.created_at) },
+          { label: '原文件', value: '暂存，未进入索引' },
+        ]} />
+        <SourcePreview key={current.id} doc={current} />
+      </>}
+    </Drawer>
+  </Page>
 }
 
-export function McpLogsPage() {
-  const [tool, setTool] = useState('all')
-  const [status, setStatus] = useState('all')
-  const [offset, setOffset] = useState(0)
-  const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) })
-  if (tool !== 'all') params.set('tool', tool); if (status !== 'all') params.set('status', status)
-  const logs = useApi<Page<McpCallLog> & { tools: string[] }>(`/admin/mcp-logs?${params.toString()}`, { poll: 15000 })
-  return <div className="page page-wide"><PageHeader title="管理" description="员工账号、内容审批与审计日志。" /><AdminNav current="mcp-logs" />
-    <Notice>参数只记录编号、数值和长度，不记录文档内容、记忆文本或问题原文。</Notice>
-    <div className="toolbar mt-4"><Select className="filter-select" label="工具" value={tool} onChange={value => { setTool(value); setOffset(0) }} options={[{ value: 'all', label: '全部工具' }, ...(logs.data?.tools ?? []).map(name => ({ value: name, label: name }))]} /><Select className="filter-select" label="状态" value={status} onChange={value => { setStatus(value); setOffset(0) }} options={[{ value: 'all', label: '全部状态' }, { value: 'ok', label: '成功' }, { value: 'error', label: '失败' }]} /></div>
-    {logs.isPending ? <Loading /> : logs.isError ? <ErrorState error={logs.error} retry={() => { void logs.refetch() }} /> : !logs.data.items.length ? <Empty title="暂无 MCP 调用" description="Agent 使用个人访问令牌调用 MCP 工具后会记录在这里。" /> : <><div className="table-wrap"><table><thead><tr><th>时间</th><th>用户</th><th>工具</th><th>传输</th><th>状态</th><th>耗时</th><th>参数</th></tr></thead><tbody>{logs.data.items.map(row => <tr key={row.id}><td className="whitespace-nowrap">{formatDate(row.created_at)}</td><td>{row.username || '—'}</td><td><code>{row.tool}</code></td><td>{row.transport}</td><td><Status value={row.status} />{row.error && <p className="text-xs text-red-700 mt-1 max-w-xs break-words">{row.error}</p>}</td><td className="tabular-nums whitespace-nowrap">{formatNumber(row.latency_ms)} ms</td><td><JsonDetails value={row.arguments} label="参数摘要" /></td></tr>)}</tbody></table></div><Pager total={logs.data.total} offset={offset} onChange={setOffset} /></>}
-  </div>
+// ------------------------------------------------------------------ approvals: decided
+
+const RESULTS: { value: '' | 'approved' | 'rejected'; label: string }[] = [{ value: '', label: '全部' }, { value: 'approved', label: '已通过' }, { value: 'rejected', label: '已驳回' }]
+
+function outcome(doc: ReviewedDocument): { text: string; tone: 'ok' | 'err' | 'muted' } {
+  if (doc.result === 'rejected') return doc.review_note ? { text: doc.review_note, tone: 'err' } : { text: '未填写驳回原因', tone: 'muted' }
+  if (doc.status === 'ready') return { text: `已就绪，${doc.chunk_count} 个分块`, tone: 'ok' }
+  if (doc.status === 'failed') return { text: doc.error ? `处理失败：${doc.error}` : '处理失败', tone: 'err' }
+  return { text: '正在入库', tone: 'muted' }
+}
+
+export function ReviewHistoryPage() {
+  const [result, setResult] = useState<'' | 'approved' | 'rejected'>('')
+  const [text, setText] = useState('')
+  const [query, setQuery] = useState('')
+  const [applicant, setApplicant] = useState('')
+  const [range, setRange] = useState<TimeRange>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0])
+  const [openId, setOpenId] = useState<string | null>(null)
+  const { choices } = useUserChoices()
+  const since = useRangeStart(range)
+
+  const params = new URLSearchParams({ limit: String(pageSize), offset: String((page - 1) * pageSize), type: 'document' })
+  if (result) params.set('result', result)
+  if (query) params.set('q', query)
+  if (applicant) params.set('uploader_id', applicant)
+  if (since) params.set('since', since)
+  const history = useApi<ReviewHistory>(`/admin/reviews/history?${params.toString()}`, { poll: 30000 })
+  const items = history.data?.items ?? []
+  const index = items.findIndex(doc => doc.id === openId)
+  const current = index >= 0 ? items[index] : null
+  const counts = history.data?.counts
+
+  function step(offset: number): void { if (items.length) setOpenId(items[(Math.max(index, 0) + offset + items.length) % items.length].id) }
+  const columns: Column<ReviewedDocument>[] = [
+    { key: 'type', header: '类型', cell: TypeTag, nowrap: true },
+    { key: 'name', header: '内容', cell: doc => <button type="button" className="tm-linkbtn ad-name" onClick={() => setOpenId(doc.id)}>{doc.filename}</button> },
+    { key: 'kb', header: '提交到', cell: doc => <span className="tm-muted">{doc.knowledge_base_name}</span>, nowrap: true },
+    { key: 'who', header: '申请人', cell: doc => personName(doc.uploader), nowrap: true },
+    { key: 'at', header: '申请时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.created_at)}</span>, nowrap: true },
+    { key: 'result', header: '结果', cell: doc => <StatusTag value={doc.result} />, nowrap: true },
+    { key: 'reviewer', header: '审批人', cell: doc => personName(doc.reviewer), nowrap: true },
+    { key: 'reviewed', header: '审批时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.reviewed_at)}</span>, nowrap: true },
+    { key: 'note', header: '处理结果 / 驳回原因', cell: doc => { const info = outcome(doc); return <span className={`ad-clip ad-${info.tone}`} title={info.text}>{info.text}</span> } },
+  ]
+
+  return <Page side={<AdminSide />} title="已审批">
+    <form className="ad-filters" onSubmit={event => { event.preventDefault(); setQuery(text.trim()); setPage(1) }}>
+      <Segmented label="审批结果" value={result} onChange={value => { setResult(value); setPage(1) }}
+        items={RESULTS.map(item => ({ ...item, count: counts ? (item.value ? counts[item.value] : counts.all) : undefined }))} />
+      <label className="tm-search ad-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文件名或驳回原因" placeholder="搜索文件名或驳回原因" value={text}
+        onChange={event => { setText(event.target.value); if (!event.target.value.trim() && query) { setQuery(''); setPage(1) } }} /></label>
+      <SearchableSelect label="申请人" options={choices} value={applicant} onChange={value => { setApplicant(value); setPage(1) }} />
+      <SearchableSelect label="审批时间" options={TIME_RANGE_OPTIONS} value={range} onChange={value => { setRange(value as TimeRange); setPage(1) }} />
+    </form>
+    {history.isPending ? <Loading /> : history.isError ? <ErrorState error={history.error} retry={() => { void history.refetch() }} />
+      : <section className="tm-panel ad-panel" aria-label="已审批文档">
+        <DataTable label="已审批文档" columns={columns} rows={items} rowKey={doc => doc.id} minWidth={1060} selectedKey={openId} onRowClick={doc => setOpenId(doc.id)}
+          empty={<Empty title="没有符合条件的审批记录" />} />
+        <Pager total={history.data.total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizes={PAGE_SIZES} unit="项" />
+      </section>}
+    <Drawer open={!!current} onOpenChange={value => { if (!value) setOpenId(null) }} width={520} label={current?.filename}
+      leading={<TypeTag />} title={current?.filename} position={current ? `${index + 1} / ${items.length}` : undefined}
+      onPrev={items.length > 1 ? () => step(-1) : undefined} onNext={items.length > 1 ? () => step(1) : undefined}>
+      {current && <>
+        <div className={`ad-result ad-result-${current.result}`}><StatusTag value={current.result} /><span>{personName(current.reviewer)}，{formatStamp(current.reviewed_at)}</span></div>
+        <FactList items={[
+          { label: '提交到', value: `${current.knowledge_base_name}（平台）` },
+          { label: '申请人', value: personName(current.uploader) },
+          { label: '申请时间', value: formatStamp(current.created_at) },
+          { label: '审批时间', value: formatStamp(current.reviewed_at) },
+          current.result === 'rejected' ? { label: '驳回原因', value: current.review_note || '未填写' } : { label: '处理结果', value: outcome(current).text },
+          { label: '原文件', value: current.result === 'rejected' ? '已删除' : '已保留' },
+        ]} />
+        {current.result === 'approved' && <div><Link className={buttonClass('secondary')} to={`/knowledge/${current.knowledge_base_id}/documents/${current.id}`}>打开这份文档</Link></div>}
+      </>}
+    </Drawer>
+  </Page>
 }

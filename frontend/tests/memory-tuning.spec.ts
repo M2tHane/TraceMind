@@ -34,7 +34,7 @@ async function mockApi(page: Page): Promise<string[]> {
       return route.fulfill({ status: 400, json: { detail: 'unexpected write' } })
     }
     if (path === '/api/conversations') return route.fulfill({ json: [] })
-    if (path === '/api/memories' && url.searchParams.get('scope') === 'personal') return route.fulfill({ json: { total: url.searchParams.get('status') === 'active' ? 2 : 0, items: url.searchParams.get('status') === 'active' ? memories : [] } })
+    if (path === '/api/memories' && !url.searchParams.has('scope')) return route.fulfill({ json: { total: url.searchParams.get('status') === 'active' ? 2 : 0, items: url.searchParams.get('status') === 'active' ? memories : [] } })
     if (path === '/api/memories') return route.fulfill({ json: { total: 0, items: [] } })
     if (path === '/api/memories/m1/history') return route.fulfill({ json: [{ id: 'e1', memory_id: 'm1', user_id: 'user:1', action: 'create', before: null, after: memories[0], actor: 'mcp', created_at: createdAt }, { id: 'e2', memory_id: 'm1', user_id: 'user:1', action: 'update', before: { ...memories[0], content: '用户偏好中文' }, after: memories[0], actor: 'api', created_at: createdAt }] })
     if (path === '/api/tuning-runs') return route.fulfill({ json: [tuning] })
@@ -60,22 +60,41 @@ for (const width of [375, 1440]) {
 
     await page.goto('/memory')
     await expect(page.getByText('用户偏好简洁的中文回答')).toBeVisible()
-    await expect(page.getByRole('button', { name: '合并所选' })).toBeDisabled()
+    // Merging is offered only after rows are ticked, and needs at least two.
+    await expect(page.getByRole('button', { name: '合并为一条' })).toHaveCount(0)
+    await page.getByRole('checkbox', { name: /^选择 用户偏好简洁/ }).check()
+    await expect(page.getByRole('button', { name: '合并为一条' })).toBeDisabled()
+    await page.getByRole('checkbox', { name: /^选择 用户是一名/ }).check()
+    await expect(page.getByRole('button', { name: '合并为一条' })).toBeEnabled()
+    await page.getByRole('button', { name: '取消选择' }).click()
+    await expect(page.getByRole('button', { name: '合并为一条' })).toHaveCount(0)
     await expectNoPageOverflow(page)
-    await page.getByRole('button', { name: '历史' }).first().click()
-    await expect(page.getByRole('dialog').getByText('用户偏好中文')).toBeVisible()
-    await page.keyboard.press('Escape')
+    // A row opens its change history in the side panel (it used to be a dialog behind a 历史 button).
+    await page.getByRole('button', { name: '用户偏好简洁的中文回答' }).click()
+    await expect(page.getByRole('complementary', { name: '变更历史' }).getByText('用户偏好中文')).toBeVisible()
+    await page.getByRole('button', { name: '关闭变更历史' }).click()
+    await expect(page.getByRole('complementary', { name: '变更历史' })).toHaveCount(0)
     await page.getByLabel('语义检索记忆').fill('数据库')
     await page.getByLabel('语义检索记忆').press('Enter')
     await expect(page.getByText('相似度 0.710')).toBeVisible()
     await expect(page.getByText('用户偏好简洁的中文回答')).toHaveCount(0)
 
     await page.goto('/evaluation/tuning')
-    await expect(page.getByRole('link', { name: '预设网格' })).toBeVisible()
+    await expect(page.getByRole('main').getByRole('link', { name: '预设网格' })).toBeVisible()
     await expectNoPageOverflow(page)
     await page.goto('/evaluation/tuning/tune-1')
     await expect(page.getByText('当前默认')).toHaveCount(1)
-    await expect(page.getByRole('button', { name: '设为默认' })).toHaveCount(2)
+    // “设为默认” now lives in each row's action menu: offered on the two other candidates, not on the current default.
+    await expect(page.getByRole('button', { name: /^更多操作/ })).toHaveCount(3)
+    for (const name of ['bm25', 'vector_with_a_particularly_long_candidate_name']) {
+      await page.getByRole('button', { name: `更多操作 ${name}`, exact: true }).click()
+      await expect(page.getByRole('button', { name: '设为默认' })).toHaveCount(1)
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('button', { name: '设为默认' })).toHaveCount(0)
+    }
+    await page.getByRole('button', { name: '更多操作 hybrid_rerank', exact: true }).click()
+    await expect(page.getByRole('button', { name: '设为默认' })).toHaveCount(0)
+    await page.keyboard.press('Escape')
     await expectNoPageOverflow(page)
 
     await page.goto('/evaluation/retrieval')

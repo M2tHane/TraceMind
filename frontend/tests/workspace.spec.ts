@@ -80,10 +80,10 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
     { path: '/knowledge', heading: '知识库', name: 'knowledge' },
     { path: `/knowledge/${kb.id}`, heading: kb.name, name: 'knowledge-detail' },
     { path: `/knowledge/${kb.id}/documents/${doc.id}`, heading: doc.filename, name: 'document' },
-    { path: '/evaluation', heading: '评测工作区', name: 'evaluations' },
+    { path: '/evaluation', heading: '批量评测', name: 'evaluations' },
     { path: `/evaluation/runs/${run.id}`, heading: run.name, name: 'run' },
     { path: `/evaluation/datasets/${dataset.id}`, heading: dataset.name, name: 'dataset' },
-    { path: '/evaluation/retrieval', heading: '检索对比实验', name: 'debug' },
+    { path: '/evaluation/retrieval', heading: '检索对比', name: 'debug' },
     { path: '/settings', heading: '环境与设置', name: 'settings' },
   ]
   for (const width of [375, 768, 1024, 1440]) {
@@ -104,8 +104,8 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
   }
   await page.goto(`/chat/${conversation.id}`)
   await expect(page.locator('.message-assistant .markdown')).toContainText('Milvus')
-  await expect(page.locator('.message-user .user-content').first()).toHaveCSS('background-color', 'rgb(228, 237, 255)')
-  await expect(page.locator('.assistant-bubble').first()).toHaveCSS('background-color', 'rgb(245, 246, 249)')
+  await expect(page.locator('.message-user .user-content').first()).toHaveCSS('background-color', 'rgb(221, 232, 225)')
+  await expect(page.locator('.assistant-bubble').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   const userBubble = await page.locator('.message-user .user-content').first().boundingBox()
   const answerBubble = await page.locator('.assistant-bubble').first().boundingBox()
   expect(userBubble!.x).toBeGreaterThan(answerBubble!.x)
@@ -126,17 +126,18 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
   await page.screenshot({ path: resolve(screenshots, 'citation-pdf-1440.png'), fullPage: true })
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   await page.goto(`/knowledge/${kb.id}/documents/${doc.id}`)
+  // Chunks are the default tab of the parsed pane; the parsed text is one tab over.
+  await page.getByRole('tab', { name: '解析正文' }).click()
   await expect(page.locator('.document-parsed .markdown')).toContainText('Milvus')
-  await page.getByRole('button', { name: /^分块/ }).click()
+  await page.getByRole('tab', { name: /^分块/ }).click()
   await expect(page.locator('.chunk-card')).not.toHaveCount(0)
-  await page.locator('.chunk-card .text-link').first().click()
+  await page.locator('.chunk-card').first().click()
   await expectRenderedPdf(page, '.document-original .pdf-viewer')
   await expect(page.locator('.document-original canvas')).toHaveAttribute('data-pdf-page', '1')
   await page.screenshot({ path: resolve(screenshots, 'document-chunks-1440.png'), fullPage: true })
   await page.goto(`/evaluation/runs/${run.id}`)
-  await page.getByRole('button', { name: /^逐题检查/ }).click()
-  await page.getByRole('button', { name: '检查对比' }).first().click()
-  await expect(page.getByRole('dialog')).toContainText('模型裁判')
+  await page.getByRole('table', { name: '逐题结果' }).locator('tbody .ev-q').first().click()
+  await expect(page.getByRole('dialog')).toContainText('参考答案')
   await expect(page.getByRole('dialog')).toContainText('Milvus')
   await page.screenshot({ path: resolve(screenshots, 'evaluation-inspection-1440.png'), fullPage: true })
   await page.getByRole('button', { name: '关闭', exact: true }).click()
@@ -177,20 +178,21 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
     await expectNoPageOverflow(page)
     await page.goto('/evaluation')
     await page.getByRole('button', { name: '新建评测', exact: true }).click()
-    const runKb = page.getByRole('combobox', { name: '知识库', exact: true })
-    await runKb.focus(); await page.keyboard.press('ArrowDown')
+    await expect(page.getByRole('dialog').getByRole('textbox', { name: '评测名称' })).toBeFocused()
+    const runKb = page.getByRole('dialog').getByRole('button', { name: '知识库', exact: true })
+    await runKb.focus(); await page.keyboard.press('Enter')
     await expect(page.getByRole('listbox')).toBeVisible()
     await chooseByKeyboard(page)
     await expect(runKb).toBeFocused()
     await expect(runKb).not.toHaveText('选择知识库')
-    const runDataset = page.getByRole('combobox', { name: '问题数据集', exact: true })
-    await runDataset.focus(); await page.keyboard.press('ArrowDown')
+    const runDataset = page.getByRole('dialog').getByRole('button', { name: '题集', exact: true })
+    await runDataset.focus(); await page.keyboard.press('Enter')
     await expect(page.getByRole('listbox')).toBeVisible()
     await expectNoPageOverflow(page)
     await page.screenshot({ path: resolve(screenshots, `run-select-${width}.png`), fullPage: true })
     await chooseByKeyboard(page)
     await expect(runDataset).toBeFocused()
-    await runDataset.press('ArrowDown'); await expect(page.getByRole('listbox')).toBeVisible(); await page.keyboard.press('Escape')
+    await runDataset.press('Enter'); await expect(page.getByRole('listbox')).toBeVisible(); await page.keyboard.press('Escape')
     await expect(runDataset).toBeFocused()
     await page.getByRole('button', { name: '取消', exact: true }).click()
   }
@@ -201,7 +203,7 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
   await page.goto('/evaluation')
   await page.getByRole('navigation', { name: '评测工作区', exact: true }).getByRole('link', { name: '检索对比', exact: true }).click()
   await expect(page).toHaveURL(/\/evaluation\/retrieval$/)
-  await expect(page.locator('.primary-nav .rail-active')).toContainText('评测实验')
+  await expect(page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '评测', exact: true })).toHaveAttribute('aria-current', 'page')
   await page.goto(`/debug?kb=${kb.id}`)
   await expect(page).toHaveURL(new RegExp(`/evaluation/retrieval\\?kb=${kb.id}$`))
   await page.setViewportSize({ width: 1440, height: 1000 })

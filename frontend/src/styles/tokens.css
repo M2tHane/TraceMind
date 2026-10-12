@@ -1,0 +1,88 @@
+/* TraceMind design tokens. Yellow (hl / cite / ev) is reserved for evidence. */
+:root {
+  --tm-bg: #F3F5F1;
+  --tm-surface: #FFFFFF;
+  --tm-surface-2: #FAFBF9;
+  --tm-surface-3: #F6F7F5;
+  --tm-rail: #E3E7E1;
+  --tm-rail-line: #D2D7CF;
+  --tm-hover: #EDF0EB;
+  --tm-ink: #18201D;
+  --tm-ink-hover: #2D3632;
+  --tm-text-2: #2C3531;
+  --tm-text-3: #3E4843;
+  --tm-muted: #56605B;
+  --tm-faint: #646E69;
+  --tm-disabled: #A3ABA6;
+  --tm-line: #D7DBD5;
+  --tm-line-soft: #E8EBE6;
+  --tm-control: #C5CBC3;
+  --tm-pine: #0E6B54;
+  --tm-pine-hover: #0A5241;
+  --tm-pine-tint: #E2EDE7;
+  --tm-pine-tint-text: #0A4F3E;
+  --tm-bubble-user: #DDE8E1;
+  --tm-bubble-user-line: #C9DAD0;
+  --tm-hl: #F5DF73;
+  --tm-cite: #F6EDC2;
+  --tm-cite-line: #E1CF7E;
+  --tm-cite-text: #5E4700;
+  --tm-cite-on: #F2D34E;
+  --tm-cite-on-line: #B99A12;
+  --tm-cite-on-text: #2E2300;
+  --tm-ev-card: #FFFDF4;
+  --tm-ev-card-line: #D9C76A;
+  --tm-badge: #6A4BC4;
+  --tm-danger: #9C1C25;
+  --tm-danger-line: #E5C3C5;
+
+  --tm-tag-neutral-bg: #ECEFEA; --tm-tag-neutral: #3E4843;
+  --tm-tag-ok-bg: #E1F0E9; --tm-tag-ok: #0A5241;
+  --tm-tag-run-bg: #E3E9FA; --tm-tag-run: #2A47A8;
+  --tm-tag-wait-bg: #EDE7F9; --tm-tag-wait: #553AA8;
+  --tm-tag-err-bg: #F8E3E4; --tm-tag-err: #9C1C25;
+  --tm-tag-warn-bg: #F1ECE4; --tm-tag-warn: #6B4A12;
+  --tm-tag-platform-bg: #E0EBEF; --tm-tag-platform: #1F4F63;
+  --tm-tag-personal-bg: #EEE8F6; --tm-tag-personal: #5A3F94;
+
+  --tm-stage-scope: #8A938E;
+  --tm-stage-vector: #3156C8;
+  --tm-stage-bm25: #B4572B;
+  --tm-stage-fusion: #6A4BC4;
+  --tm-stage-rerank: #0E6B54;
+  --tm-stage-post: #18201D;
+
+  --tm-step-done: #0E6B54;
+  --tm-step-now: #3156C8;
+  --tm-step-todo: #DDE1DB;
+  --tm-step-fail: #C2333D;
+
+  --tm-font: 'IBM Plex Sans', "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --tm-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --tm-rail-w: 64px;
+  --tm-side-w: 240px;
+  --tm-bar-h: 56px;
+  --tm-shadow-pop: 0 8px 24px rgba(24, 32, 29, .14);
+  --tm-shadow-drawer: -12px 0 32px rgba(24, 32, 29, .12);
+  --tm-motion: 160ms;
+}
+@media (prefers-reduced-motion: reduce) { :root { --tm-motion: 0ms; } }
+
+html, body { background: var(--tm-bg); color: var(--tm-ink); }
+body {
+  margin: 0; min-width: 320px; font-family: var(--tm-font); font-size: 13px; line-height: 1.55;
+  font-synthesis: none; -webkit-font-smoothing: antialiased; caret-color: var(--tm-pine);
+}
+*, *::before, *::after { box-sizing: border-box; }
+button, input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--tm-pine); text-decoration: none; }
+a:hover { color: var(--tm-pine-hover); }
+::selection { background: var(--tm-pine-tint); color: var(--tm-ink); }
+:focus-visible { outline: 2px solid var(--tm-pine); outline-offset: 1px; }
+code, kbd, pre, samp { font-family: var(--tm-mono); }
+td, th, .tabular-nums { font-variant-numeric: tabular-nums; }
+* { scrollbar-width: thin; scrollbar-color: #C5CBC3 transparent; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; scroll-behavior: auto !important; }
+}

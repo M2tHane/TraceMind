@@ -1,0 +1,11 @@
+@import './tokens.css';
+@import './ui.css';
+@import './shell.css';
+@import '../styles.css';
+@import './markdown.css';
+@import './pages/chat.css';
+@import './pages/knowledge.css';
+@import './pages/memory.css';
+@import './pages/evaluation.css';
+@import './pages/admin.css';
+@import './pages/account.css';
