@@ -164,3 +164,7 @@
   .tm-chat-list, .tm-chat-list-collapsed { order: 3; }
 }
 .trace-excerpt { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tm-text-3); }
+
+/* The chat page is one white surface: list, conversation and evidence pane differ only by hairlines. */
+body:has(.chat-layout), .tm-app:has(.chat-layout) { background: var(--tm-surface); }
+.tm-chat-list, .tm-chat-list-collapsed, .evidence-pane, .evidence-pane-collapsed { background: var(--tm-surface); }
