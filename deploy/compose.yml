@@ -1,0 +1,109 @@
+name: rag-workbench
+# Local dependency stack. Every port binds to 127.0.0.1 only.
+#   postgres  127.0.0.1:25432  business metadata, chunks, memories, job queue
+#   milvus    127.0.0.1:29530  document vectors (etcd + minio are internal only)
+#   mineru    127.0.0.1:28000  PDF parsing (CPU pipeline backend; first build downloads models)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rag_workbench
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+    ports:
+      - "127.0.0.1:25432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag_workbench"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+    restart: unless-stopped
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: minio server /minio_data
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.6.6
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MQ_TYPE: woodpecker
+    ports:
+      - "127.0.0.1:29530:19530"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      start_period: 90s
+      retries: 8
+    restart: unless-stopped
+
+  mineru:
+    build:
+      context: ./mineru
+      args:
+        MINERU_MODEL_SOURCE: ${MINERU_MODEL_SOURCE:-modelscope}
+    image: rag-workbench-mineru:local
+    ports:
+      - "127.0.0.1:28000:8000"
+    volumes:
+      - mineru-output:/app/output
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 8
+    mem_limit: 8g
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  etcd-data:
+  minio-data:
+  milvus-data:
+  mineru-output:
