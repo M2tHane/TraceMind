@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Empty, ErrorBoundary, Loading } from './components/ui'
-import { Page, Rail } from './components/shell/Shell'
+import { Page, Sidebar } from './components/shell/Shell'
+import { UnsavedChangesDialog } from './components/shell/unsaved'
 import { useAuth } from './lib/auth'
 
 const ChatPage = lazy(() => import('./pages/Chat').then(module => ({ default: module.ChatPage })))
@@ -51,7 +52,8 @@ function Workspace() {
   const admin = useAuth().user?.role === 'admin'
   return <div className="tm-app">
     <a className="tm-skip" href="#main-content">跳转到主要内容</a>
-    <Rail />
+    <Sidebar />
+    <UnsavedChangesDialog />
     <ErrorBoundary><Suspense fallback={<main className="tm-main"><Loading label="正在打开工作区…" /></main>}><Routes>
       <Route path="/" element={<Navigate to="/chat" replace />} />
       <Route path="/chat" element={<ChatPage />} /><Route path="/chat/:id" element={<ChatPage />} />

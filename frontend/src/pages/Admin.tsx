@@ -9,7 +9,6 @@ import { useAuth } from '../lib/auth'
 import type { PendingDocument, Role, UserAccount } from '../lib/types'
 import { Button, DataTable, Drawer, Empty, ErrorState, FactList, Loading, Modal, Pager, ScopeTag, SearchableSelect, Segmented, StatusTag, Tag, buttonClass, type Column } from '../components/ui'
 import { FormField } from '../components/ConfigurationControls'
-import { AdminSide } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
 import { Markdown } from '../components/sources'
 import { PdfCanvas } from '../components/PdfCanvas'
@@ -26,7 +25,7 @@ function TemporaryPassword({ account, onClose }: { account: UserAccount | null; 
   return <Modal open={account !== null} onOpenChange={value => { if (!value) onClose() }} title="临时密码" description={`账号 ${account?.username ?? ''} 首次登录后必须修改密码。`}>
     <div className="dialog-body space-y-4">
       <p className="tm-note m-0">临时密码只显示这一次，请通过安全渠道交给员工。</p>
-      <code className="ad-secret" data-testid="temporary-password">{account?.temporary_password}</code>
+      <code className="adm-secret" data-testid="temporary-password">{account?.temporary_password}</code>
       <div className="dialog-actions">
         <Button variant="secondary" onClick={() => { void navigator.clipboard.writeText(account?.temporary_password ?? '').then(() => toast.success('已复制'), () => toast.error('复制失败，请手动选择文本')) }}><Copy size={14} />复制</Button>
         <Button onClick={onClose}>完成</Button>
@@ -58,27 +57,27 @@ export function UsersPage() {
     { key: 'account', header: '账号', cell: account => <>
       <span className="font-medium">{account.display_name || account.username}</span>
       <span className="ml-2 tm-faint text-xs">{account.username}{account.id === me?.id ? '（我）' : ''}</span>
-      {account.must_change_password && <span className="tm-table-sub" style={{ color: 'var(--tm-tag-warn)' }}>等待首次修改密码</span>}
+      {account.must_change_password && <span className="tm-table-sub" style={{ color: 'var(--warning)' }}>等待首次修改密码</span>}
     </> },
     { key: 'role', header: '角色', cell: account => account.role === 'admin' ? <Tag tone="ink">管理员</Tag> : <Tag>员工</Tag>, nowrap: true },
     { key: 'status', header: '状态', cell: account => <StatusTag value={account.status} />, nowrap: true },
     { key: 'login', header: '最近登录', cell: account => <span className="tm-muted tm-num">{formatStamp(account.last_login_at)}</span>, nowrap: true },
     { key: 'created', header: '创建', cell: account => <span className="tm-muted tm-num">{formatStamp(account.created_at)}</span>, nowrap: true },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: account => account.id === me?.id ? null : <span className="inline-flex gap-4">
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: account => account.id === me?.id ? null : <span className="inline-flex gap-4">
       <button type="button" className="tm-textlink" disabled={update.isPending} onClick={() => update.mutate({ id: account.id, role: account.role === 'admin' ? 'employee' : 'admin' })}>{account.role === 'admin' ? '设为员工' : '设为管理员'}</button>
       <button type="button" className="tm-textlink" disabled={update.isPending} onClick={() => { if (account.status === 'active' && !window.confirm(`停用 ${account.username}？该账号将立即退出登录，令牌失效。`)) return; update.mutate({ id: account.id, status: account.status === 'active' ? 'disabled' : 'active' }) }}>{account.status === 'active' ? '停用' : '启用'}</button>
       <button type="button" className="tm-textlink" disabled={reset.isPending} onClick={() => { if (window.confirm(`为 ${account.username} 生成新的临时密码？`)) reset.mutate(account.id) }}>重置密码</button>
     </span> },
   ]
 
-  return <Page side={<AdminSide />} title="员工账号" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建账号</Button>}>
+  return <Page title="员工账号" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建账号</Button>}>
     {users.isPending ? <Loading /> : users.isError ? <ErrorState error={users.error} retry={() => { void users.refetch() }} />
-      : <section className="tm-panel ad-panel" aria-label="员工账号">
+      : <section className="tm-panel adm-panel tm-listcard" aria-label="员工账号">
         <DataTable label="员工账号" columns={columns} rows={shown} rowKey={account => account.id} minWidth={720} rowProps={account => ({ dim: account.status === 'disabled' })} />
         <Pager total={rows.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizes={PAGE_SIZES} unit="个" />
       </section>}
     <Modal open={open} onOpenChange={value => { if (!create.isPending) setOpen(value) }} title="新建账号" description="系统生成临时密码，员工首次登录时设置自己的密码。">
-      <form className="dialog-body ad-form" onSubmit={submit}>
+      <form className="dialog-body adm-form" onSubmit={submit}>
         <FormField label="用户名" caption="3-64 位小写字母、数字或 _ . -"><input className="tm-input" name="username" required minLength={3} maxLength={64} autoFocus /></FormField>
         <FormField label="显示名"><input className="tm-input" name="display_name" maxLength={100} /></FormField>
         <div className="tm-field"><span className="tm-field-label">角色</span><Segmented label="角色" value={role} onChange={setRole} items={[{ value: 'employee', label: '员工' }, { value: 'admin', label: '管理员' }]} /></div>
@@ -119,11 +118,11 @@ function SourcePreview({ doc }: { doc: PendingDocument }) {
       .catch(() => { if (!controller.signal.aborted) setFailed(true) })
     return () => controller.abort()
   }, [doc.id, pdf])
-  return <section aria-label="原文预览" className="ad-preview-block">
-    <h3 className="ad-subtitle">原文预览</h3>
-    {pdf ? <div className="ad-preview-pdf"><PdfCanvas documentId={doc.id} page={1} filename={doc.filename} showOpenLink={false} /></div>
-      : <div className="ad-preview">{failed ? <p className="tm-muted m-0">原文加载失败，请稍后重试。</p> : text === null ? <p className="tm-faint m-0">正在加载原文…</p>
-        : markdown ? <Markdown text={text} /> : <pre className="ad-plain">{text}</pre>}</div>}
+  return <section aria-label="原文预览" className="adm-preview-block">
+    <h3 className="adm-subtitle">原文预览</h3>
+    {pdf ? <div className="adm-preview-pdf"><PdfCanvas documentId={doc.id} page={1} filename={doc.filename} showOpenLink={false} /></div>
+      : <div className="adm-preview">{failed ? <p className="tm-muted m-0">原文加载失败，请稍后重试。</p> : text === null ? <p className="tm-faint m-0">正在加载原文…</p>
+        : markdown ? <Markdown text={text} /> : <pre className="adm-plain">{text}</pre>}</div>}
   </section>
 }
 
@@ -204,21 +203,21 @@ export function ReviewsPage() {
     { key: 'at', header: '申请时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.created_at)}</span>, nowrap: true },
     { key: 'size', header: '大小', cell: doc => <span className="tm-muted">{sizeLabel(doc)}</span>, nowrap: true },
     { key: 'status', header: '状态', cell: doc => <StatusTag value={doc.review_status ?? 'pending'} />, nowrap: true },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: doc => <span className="inline-flex gap-1.5">
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: doc => <span className="inline-flex gap-1.5">
       <Button variant="secondary" size="sm" disabled={busy} aria-label={`通过 ${doc.filename}`} onClick={() => decide.mutate({ id: doc.id, approve: true, note: '' })}>通过</Button>
       <Button variant="danger" size="sm" disabled={busy} aria-label={`驳回 ${doc.filename}`} onClick={() => open(doc.id, true)}>驳回</Button>
     </span> },
   ]
 
-  return <Page side={<AdminSide />} title="待审批">
+  return <Page title="待审批">
     {reviews.isPending ? <Loading /> : reviews.isError ? <ErrorState error={reviews.error} retry={() => { void reviews.refetch() }} /> : <>
-      <div className="ad-filters">
-        <label className="tm-search ad-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文档名" placeholder="搜索文件名" value={text} onChange={event => { setText(event.target.value); setPage(1) }} /></label>
+      <div className="adm-filters">
+        <label className="tm-search adm-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文档名" placeholder="搜索文件名" value={text} onChange={event => { setText(event.target.value); setPage(1) }} /></label>
         <SearchableSelect label="申请人" options={applicants} value={applicant} onChange={value => { setApplicant(value); setPage(1) }} />
         <span className="flex-1" />
         <Button variant="secondary" disabled={!selected.size || busy} busy={approveMany.isPending} onClick={() => approveMany.mutate([...selected])}>批量通过{selected.size ? ` ${selected.size}` : ''}</Button>
       </div>
-      <section className="tm-panel ad-panel" aria-label="待审批文档">
+      <section className="tm-panel adm-panel tm-listcard" aria-label="待审批文档">
         <DataTable label="待审批文档" columns={columns} rows={shown} rowKey={doc => doc.id} minWidth={980} selectedKey={openId} onRowClick={doc => open(doc.id)}
           selection={{ selected, onChange: setSelected, label: key => all.find(doc => doc.id === key)?.filename ?? key }}
           empty={all.length ? '没有符合条件的文档' : '没有待审批文档'} />
@@ -231,7 +230,7 @@ export function ReviewsPage() {
       footer={current && <>
         <label className="tm-field-label" htmlFor="review-note">驳回原因（可选，申请人能看到）</label>
         <textarea id="review-note" ref={reasonBox} className="tm-input" rows={2} maxLength={1000} placeholder="例如：内容与现行制度重复，请合并后重新提交" value={reason} onChange={event => setReason(event.target.value)} />
-        <div className="ad-foot-actions">
+        <div className="adm-foot-actions">
           <Button variant="danger" disabled={busy} onClick={() => decide.mutate({ id: current.id, approve: false, note: reason.trim() })}>驳回并删除原文件</Button>
           <Button disabled={busy} busy={decide.isPending} onClick={() => decide.mutate({ id: current.id, approve: true, note: '' })}>通过并开始解析</Button>
         </div>
@@ -287,27 +286,27 @@ export function ReviewHistoryPage() {
   function step(offset: number): void { if (items.length) setOpenId(items[(Math.max(index, 0) + offset + items.length) % items.length].id) }
   const columns: Column<ReviewedDocument>[] = [
     { key: 'type', header: '类型', cell: TypeTag, nowrap: true },
-    { key: 'name', header: '内容', cell: doc => <button type="button" className="tm-linkbtn ad-name" onClick={() => setOpenId(doc.id)}>{doc.filename}</button> },
+    { key: 'name', header: '内容', cell: doc => <button type="button" className="tm-linkbtn adm-name" onClick={() => setOpenId(doc.id)}>{doc.filename}</button> },
     { key: 'kb', header: '提交到', cell: doc => <span className="tm-muted">{doc.knowledge_base_name}</span>, nowrap: true },
     { key: 'who', header: '申请人', cell: doc => personName(doc.uploader), nowrap: true },
     { key: 'at', header: '申请时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.created_at)}</span>, nowrap: true },
     { key: 'result', header: '结果', cell: doc => <StatusTag value={doc.result} />, nowrap: true },
     { key: 'reviewer', header: '审批人', cell: doc => personName(doc.reviewer), nowrap: true },
     { key: 'reviewed', header: '审批时间', cell: doc => <span className="tm-muted tm-num">{formatStamp(doc.reviewed_at)}</span>, nowrap: true },
-    { key: 'note', header: '处理结果 / 驳回原因', cell: doc => { const info = outcome(doc); return <span className={`ad-clip ad-${info.tone}`} title={info.text}>{info.text}</span> } },
+    { key: 'note', header: '处理结果 / 驳回原因', cell: doc => { const info = outcome(doc); return <span className={`adm-clip adm-${info.tone}`} title={info.text}>{info.text}</span> } },
   ]
 
-  return <Page side={<AdminSide />} title="已审批">
-    <form className="ad-filters" onSubmit={event => { event.preventDefault(); setQuery(text.trim()); setPage(1) }}>
+  return <Page title="已审批">
+    <form className="adm-filters" onSubmit={event => { event.preventDefault(); setQuery(text.trim()); setPage(1) }}>
       <Segmented label="审批结果" value={result} onChange={value => { setResult(value); setPage(1) }}
         items={RESULTS.map(item => ({ ...item, count: counts ? (item.value ? counts[item.value] : counts.all) : undefined }))} />
-      <label className="tm-search ad-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文件名或驳回原因" placeholder="搜索文件名或驳回原因" value={text}
+      <label className="tm-search adm-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索文件名或驳回原因" placeholder="搜索文件名或驳回原因" value={text}
         onChange={event => { setText(event.target.value); if (!event.target.value.trim() && query) { setQuery(''); setPage(1) } }} /></label>
       <SearchableSelect label="申请人" options={choices} value={applicant} onChange={value => { setApplicant(value); setPage(1) }} />
       <SearchableSelect label="审批时间" options={TIME_RANGE_OPTIONS} value={range} onChange={value => { setRange(value as TimeRange); setPage(1) }} />
     </form>
     {history.isPending ? <Loading /> : history.isError ? <ErrorState error={history.error} retry={() => { void history.refetch() }} />
-      : <section className="tm-panel ad-panel" aria-label="已审批文档">
+      : <section className="tm-panel adm-panel tm-listcard" aria-label="已审批文档">
         <DataTable label="已审批文档" columns={columns} rows={items} rowKey={doc => doc.id} minWidth={1060} selectedKey={openId} onRowClick={doc => setOpenId(doc.id)}
           empty={<Empty title="没有符合条件的审批记录" />} />
         <Pager total={history.data.total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizes={PAGE_SIZES} unit="项" />
@@ -316,7 +315,7 @@ export function ReviewHistoryPage() {
       leading={<TypeTag />} title={current?.filename} position={current ? `${index + 1} / ${items.length}` : undefined}
       onPrev={items.length > 1 ? () => step(-1) : undefined} onNext={items.length > 1 ? () => step(1) : undefined}>
       {current && <>
-        <div className={`ad-result ad-result-${current.result}`}><StatusTag value={current.result} /><span>{personName(current.reviewer)}，{formatStamp(current.reviewed_at)}</span></div>
+        <div className={`adm-result adm-result-${current.result}`}><StatusTag value={current.result} /><span>{personName(current.reviewer)}，{formatStamp(current.reviewed_at)}</span></div>
         <FactList items={[
           { label: '提交到', value: `${current.knowledge_base_name}（平台）` },
           { label: '申请人', value: personName(current.uploader) },

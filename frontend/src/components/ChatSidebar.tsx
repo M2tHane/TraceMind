@@ -17,7 +17,7 @@ function dayGroup(value: string, now = new Date()): '今天' | '昨天' | '更�
 /** Conversation list of the chat module: collapsible, 200–360px wide, state kept in localStorage. */
 export function ChatSidebar({ kbId }: { kbId?: string }) {
   const navigate = useNavigate()
-  const [open, setOpen] = useStoredState('tm.chat.history-open', true)
+  const [open, setOpen] = useStoredState('tm.chat.history-open', typeof window === 'undefined' || window.innerWidth >= 1440)
   const [width, setWidth] = useStoredState('tm.chat.history-width', 248)
   const [query, setQuery] = useState('')
   const history = useApi<Conversation[]>('/conversations', { poll: 15000 })
@@ -32,7 +32,7 @@ export function ChatSidebar({ kbId }: { kbId?: string }) {
   }, [history.data, kbs.data, query])
   if (!open) return <CollapsedPanel side="left" name="对话列表" onToggle={() => setOpen(true)} className="tm-chat-list tm-chat-list-collapsed" />
   return <aside className="tm-chat-list" style={{ flexBasis: width, width }} aria-label="对话列表">
-    <PanelHeader toggle={{ side: 'left', expanded: true, onToggle: () => setOpen(false), name: '对话列表' }}><h2>知识问答</h2></PanelHeader>
+    <PanelHeader toggle={{ side: 'left', expanded: true, onToggle: () => setOpen(false), name: '对话列表' }}><h2>对话</h2></PanelHeader>
     <div className="tm-chat-list-tools">
       <Button className="w-full" onClick={() => navigate(kbId ? `/chat?kb=${kbId}` : '/chat')}><Plus size={14} />新对话</Button>
       <label className="tm-search"><Search size={14} aria-hidden="true" /><input type="search" placeholder="搜索对话" aria-label="搜索对话" value={query} onChange={event => setQuery(event.target.value)} /></label>
@@ -42,9 +42,9 @@ export function ChatSidebar({ kbId }: { kbId?: string }) {
         : history.isError ? <button type="button" className="tm-textlink px-2" onClick={() => { void history.refetch() }}>读取失败，重试</button>
           : !groups.length ? <p className="tm-faint px-2">{query ? '没有匹配的对话' : '暂无对话'}</p>
             : groups.map(group => <div key={group.name}>
-              <div className="tm-side-group">{group.name}</div>
-              {group.items.map(item => <NavLink key={item.id} to={`/chat/${item.id}`} title={item.title} className="tm-si tm-si-two">
-                <span className="tm-si-label">{item.title}</span>{item.kb && <span className="tm-si-sub">{item.kb}</span>}
+              <div className="tm-chat-group">{group.name}</div>
+              {group.items.map(item => <NavLink key={item.id} to={`/chat/${item.id}`} title={item.title} className="tm-chat-item">
+                <b>{item.title}</b>{item.kb && <span>{item.kb}</span>}
               </NavLink>)}
             </div>)}
     </section>

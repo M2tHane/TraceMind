@@ -7,13 +7,13 @@ export function configForMethod(method: Method, topK: number, candidateK: number
 }
 
 export const STAGE_META: Record<string, { label: string; color: string; column?: string }> = {
-  scope: { label: '范围过滤', color: 'var(--tm-stage-scope)' },
-  query_rewrite: { label: '查询改写', color: 'var(--tm-stage-scope)' },
-  'recall.vector': { label: '向量召回', color: 'var(--tm-stage-vector)', column: '向量' },
-  'recall.bm25': { label: 'BM25 召回', color: 'var(--tm-stage-bm25)', column: 'BM25' },
-  fusion: { label: '融合', color: 'var(--tm-stage-fusion)', column: '融合' },
-  rerank: { label: '重排', color: 'var(--tm-stage-rerank)', column: '重排' },
-  postprocess: { label: '后处理', color: 'var(--tm-stage-post)', column: '最终' },
+  scope: { label: '范围过滤', color: 'var(--stage-scope)' },
+  query_rewrite: { label: '查询改写', color: 'var(--stage-scope)' },
+  'recall.vector': { label: '向量召回', color: 'var(--stage-vector)', column: '向量' },
+  'recall.bm25': { label: 'BM25 召回', color: 'var(--stage-bm25)', column: 'BM25' },
+  fusion: { label: '融合', color: 'var(--stage-fusion)', column: '融合' },
+  rerank: { label: '重排', color: 'var(--stage-rerank)', column: '重排' },
+  postprocess: { label: '后处理', color: 'var(--stage-post)', column: '最终' },
 }
 
 const num = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -67,7 +67,7 @@ export function stageRows(stages: TraceStage[]): StageRow[] {
     else if (stage.stage === 'rerank') input = num(fusion?.count)
     else if (stage.stage === 'postprocess') input = num(stage.input)
     else if (stage.stage === 'query_rewrite') { input = 1; output = Array.isArray(stage.queries) ? stage.queries.length : undefined }
-    const meta = STAGE_META[stage.stage] ?? { label: stage.stage, color: 'var(--tm-faint)' }
+    const meta = STAGE_META[stage.stage] ?? { label: stage.stage, color: 'var(--text-3)' }
     return { stage, label: meta.label, color: meta.color, input, output, ms: stage.ms || 0, share: total ? (stage.ms || 0) / total : 0, note: stageNote(stage, queries) }
   })
 }

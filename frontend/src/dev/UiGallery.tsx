@@ -21,13 +21,13 @@ export function UiGallery() {
   const [width, setWidth] = useState(280)
   const [open, setOpen] = useState(true)
   return <div className="flex min-h-dvh">
-    {open ? <aside className="relative bg-surface-2 border-r border-line flex flex-col" style={{ width }}>
+    {open ? <aside className="relative bg-sidebar border-r border-line flex flex-col" style={{ width }}>
       <PanelHeader toggle={{ side: 'left', expanded: true, onToggle: () => setOpen(false), name: '示例面板' }}><h2>示例面板</h2></PanelHeader>
       <p className="p-3 tm-muted">宽 {width}px</p>
       <ResizeHandle edge="right" value={width} min={200} max={360} onChange={setWidth} label="拖动调整示例面板宽度" />
-    </aside> : <CollapsedPanel side="left" onToggle={() => setOpen(true)} name="示例面板" className="bg-surface-2 border-r border-line" />}
+    </aside> : <CollapsedPanel side="left" onToggle={() => setOpen(true)} name="示例面板" className="bg-sidebar border-r border-line" />}
     <main className="flex-1 min-w-0 relative" data-drawer-host>
-      <header className="h-bar bg-surface border-b border-line flex items-center gap-3 px-6"><h1 className="m-0 text-title font-semibold">组件</h1><span className="flex-1" /><Button variant="secondary">次要</Button><Button><Plus size={14} />主要</Button></header>
+      <header className="h-bar bg-app border-b border-line flex items-center gap-3 px-6"><h1 className="m-0 text-title font-semibold">组件</h1><span className="flex-1" /><Button variant="secondary">次要</Button><Button><Plus size={14} />主要</Button></header>
       <div className="p-6 flex flex-col gap-5">
         <section className="flex flex-wrap items-center gap-2">
           <Button>通过并开始解析</Button><Button variant="secondary">上传新版本</Button><Button variant="ghost">复制引文</Button><Button variant="danger">驳回并删除原文件</Button>
@@ -53,7 +53,7 @@ export function UiGallery() {
               { key: 'name', header: '文件名', cell: row => <button type="button" className="tm-linkbtn" onClick={() => setDrawer(true)}>{row.name}</button> },
               { key: 'status', header: '状态', cell: row => <StatusTag value={row.status} /> },
               { key: 'steps', header: '进度', cell: row => { const s = documentSteps(row.status === 'ready' || row.status === 'failed' ? row.status : 'processing', row.status); return <StepBar steps={s.steps} label={s.current} size="sm" /> } },
-              { key: 'chunks', header: '分块', align: 'right', cell: row => row.chunks },
+              { key: 'chunks', header: '分块', cell: row => row.chunks },
             ]} />
           <Pager total={1284} page={page} pageSize={size} onPageChange={setPage} onPageSizeChange={setSize} />
         </div>

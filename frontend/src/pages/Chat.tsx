@@ -109,7 +109,6 @@ export function ChatPage() {
   }
   const readyDocs = (documents.data ?? []).filter(doc => doc.status === 'ready')
   const hasMessages = !!id && !!messages.data?.length
-  const initial = (user?.display_name || user?.username || '我').slice(0, 1)
 
   return <>
     <ChatSidebar kbId={kbId} />
@@ -123,7 +122,7 @@ export function ChatPage() {
           : id && messages.isPending ? <Loading label="正在读取对话…" />
             : id && messages.isError ? <ErrorState error={messages.error} retry={() => { void messages.refetch() }} />
               : !hasMessages ? <ChatLanding onPrompt={prompt => { setText(prompt); input.current?.focus() }} />
-                : <div className="messages">{messages.data!.map(message => <ChatMessage key={message.id} message={message} initial={initial}
+                : <div className="messages">{messages.data!.map(message => <ChatMessage key={message.id} message={message}
                   evidence={message.role === 'assistant' ? {
                     active: message.id === shown?.id, citation,
                     onCite: index => focusPane(message, 'cites', index), onSources: () => focusPane(message, 'cites', message.id === shown?.id ? citation : 0), onTrace: () => focusPane(message, 'trace'),

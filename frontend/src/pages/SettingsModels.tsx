@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { api, useAction, useApi } from '../lib/api'
 import { secretPatch, type ModelProfile, type ModelProfileInput, type ModelProtocol } from '../lib/configuration'
 import { FormField, SecretField, TestConnection } from '../components/ConfigurationControls'
-import { SettingsSide } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
+import { confirmLeave, useUnsavedChanges } from '../components/shell/unsaved'
 import { Button, DataTable, Empty, ErrorState, Loading, Modal, Segmented, Tag, type Column } from '../components/ui'
 
 const invalidate = ['/model-profiles', '/settings']
@@ -28,23 +28,13 @@ function toForm(profile?: ModelProfile): ModelProfileInput {
 export function SettingsModels() {
   const profiles = useApi<ModelProfile[]>('/model-profiles')
   const [choice, setChoice] = useState<string | null>(null)
-  const [pending, setPending] = useState<string | null | undefined>(undefined)
-  const dirty = useRef(false)
   const list = profiles.data ?? []
   const selectedId = choice === 'new' ? null : choice ?? list.find(profile => profile.is_default)?.id ?? list[0]?.id ?? null
   const profile = list.find(item => item.id === selectedId)
   const creating = choice === 'new' || (profiles.isSuccess && list.length === 0)
 
-  const markDirty = useCallback((value: boolean) => { dirty.current = value }, [])
-  function go(next: string | null): void {
-    if (dirty.current) { setPending(next); return }
-    setChoice(next)
-  }
-  function discardAndGo(): void {
-    dirty.current = false
-    setChoice(pending ?? null)
-    setPending(undefined)
-  }
+  // Switching to another model with unsaved edits asks first (放弃并离开 / 继续编辑 / 保存并离开).
+  function go(next: string | null): void { confirmLeave(() => setChoice(next)) }
 
   const columns: Column<ModelProfile>[] = [
     { key: 'name', header: '名称', nowrap: true, cell: item => <span className="inline-flex items-center gap-1.5 max-w-full">
@@ -57,28 +47,21 @@ export function SettingsModels() {
     { key: 'key', header: '密钥', cell: item => item.api_key_set ? <Tag tone="ok">已保存</Tag> : <Tag tone="warn">未配置</Tag>, nowrap: true },
   ]
 
-  return <Page side={<SettingsSide />} title="对话模型" bare actions={<Button variant="secondary" onClick={() => go('new')}><Plus size={14} />添加模型</Button>}>
+  return <Page title="对话模型" bare actions={<Button variant="secondary" onClick={() => go('new')}><Plus size={14} />添加模型</Button>}>
     <div className="st-split">
       <section className="st-list" aria-label="对话模型列表">
         {profiles.isPending ? <Loading /> : profiles.isError ? <ErrorState error={profiles.error} retry={() => { void profiles.refetch() }} />
-          : <div className="tm-panel ad-panel"><DataTable label="对话模型" columns={columns} rows={list} rowKey={item => item.id} selectedKey={creating ? null : selectedId} onRowClick={item => go(item.id)} minWidth={560}
+          : <div className="tm-panel adm-panel"><DataTable label="对话模型" columns={columns} rows={list} rowKey={item => item.id} selectedKey={creating ? null : selectedId} onRowClick={item => go(item.id)} minWidth={560}
             empty={<Empty title="尚未配置对话模型" description="添加服务地址与模型 ID 后，即可在问答中选择。" />} /></div>}
       </section>
       {(creating || profile) && <ModelPanel key={creating ? 'new' : `${profile!.id}-${profile!.updated_at}`} profile={creating ? undefined : profile}
-        onDirty={markDirty} onSaved={saved => { dirty.current = false; setChoice(saved.id) }}
-        onRemoved={() => { dirty.current = false; setChoice(null) }} onCancelNew={() => { dirty.current = false; setChoice(null) }} />}
+        onSaved={saved => setChoice(saved.id)} onRemoved={() => setChoice(null)} onCancelNew={() => setChoice(null)} />}
     </div>
-    <Modal open={pending !== undefined} onOpenChange={open => { if (!open) setPending(undefined) }} title="放弃更改">
-      <div className="dialog-body space-y-5">
-        <p className="text-sm leading-7">有尚未保存的更改，是否放弃？</p>
-        <div className="dialog-actions"><Button variant="secondary" onClick={() => setPending(undefined)}>继续编辑</Button><Button variant="danger" onClick={discardAndGo}>放弃更改</Button></div>
-      </div>
-    </Modal>
   </Page>
 }
 
-function ModelPanel({ profile, onDirty, onSaved, onRemoved, onCancelNew }: {
-  profile?: ModelProfile; onDirty: (dirty: boolean) => void; onSaved: (profile: ModelProfile) => void; onRemoved: () => void; onCancelNew: () => void
+function ModelPanel({ profile, onSaved, onRemoved, onCancelNew }: {
+  profile?: ModelProfile; onSaved: (profile: ModelProfile) => void; onRemoved: () => void; onCancelNew: () => void
 }) {
   const [initial] = useState(() => toForm(profile))
   const [form, setForm] = useState<ModelProfileInput>(initial)
@@ -90,17 +73,17 @@ function ModelPanel({ profile, onDirty, onSaved, onRemoved, onCancelNew }: {
     max_tokens: form.max_tokens !== initial.max_tokens, timeout_seconds: form.timeout_seconds !== initial.timeout_seconds, json_mode: form.json_mode !== initial.json_mode,
   }
   const dirty = JSON.stringify(initial) !== JSON.stringify(form) || !!key || clearKey
-  useEffect(() => { onDirty(dirty) }, [dirty, onDirty])
-  useEffect(() => () => onDirty(false), [onDirty])
   const save = useAction((input: ModelProfileInput) => api<ModelProfile>(profile ? `/model-profiles/${profile.id}` : '/model-profiles', { method: profile ? 'PATCH' : 'POST', body: JSON.stringify(input) }),
     { invalidate, success: '模型配置已保存', onSuccess: saved => { setKey(''); onSaved(saved) } })
   const makeDefault = useAction((id: string) => api<ModelProfile>(`/model-profiles/${id}`, { method: 'PATCH', body: JSON.stringify({ is_default: true }) }), { invalidate, success: '默认模型已更新' })
   const remove = useAction((id: string) => api<void>(`/model-profiles/${id}`, { method: 'DELETE' }),
     { invalidate, success: '模型配置已删除，历史消息保持不变', onSuccess: () => { setRemoving(false); onRemoved() } })
 
+  const payload = (): ModelProfileInput => ({ ...form, name: form.name.trim(), model: form.model.trim(), base_url: form.base_url.trim(), ...secretPatch(key, clearKey) })
+  useUnsavedChanges(dirty, () => save.mutateAsync(payload()).then(() => true, () => false))
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
-    save.mutate({ ...form, name: form.name.trim(), model: form.model.trim(), base_url: form.base_url.trim(), ...secretPatch(key, clearKey) })
+    save.mutate(payload())
   }
   function discard(): void {
     if (!profile) { onCancelNew(); return }

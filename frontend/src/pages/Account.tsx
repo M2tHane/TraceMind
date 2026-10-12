@@ -1,14 +1,13 @@
-import { useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import { useRef, useState } from 'react'
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Copy, Plus } from 'lucide-react'
+import { Check, Copy, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { errorText, post, remove, useAction, useApi } from '../lib/api'
+import { ApiError, errorText, post, remove, useAction, useApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import type { ApiToken } from '../lib/types'
 import { BrandMark, Button, CiteMarker, DataTable, ErrorState, FactStrip, Highlight, Loading, Modal, StatusTag, Tabs, type Column } from '../components/ui'
 import { FormField } from '../components/ConfigurationControls'
-import { AccountSide } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
 import { formatDay, formatStamp, roleLabel } from './adminShared'
 
@@ -16,46 +15,80 @@ const copy = (text: string, message = '已复制'): void => { void navigator.cli
 
 // ------------------------------------------------------------------ sign-in
 
-/** Split screen shared by sign-in and the forced password change: the product idea on the left, the form on the right. */
+const REMEMBER_KEY = 'tm.login.username'
+function rememberedName(): string { try { return window.localStorage.getItem(REMEMBER_KEY) ?? '' } catch { return '' } }
+function rememberName(name: string | null): void {
+  try { if (name) window.localStorage.setItem(REMEMBER_KEY, name); else window.localStorage.removeItem(REMEMBER_KEY) } catch { /* not persisted */ }
+}
+
+/** Single page, two columns: the form on the left, a static illustration on the right (hidden below 880px). */
 function AuthScreen({ label, children }: { label: string; children: ReactNode }) {
   return <main className="lg">
-    <section className="lg-story" aria-label="产品说明">
-      <div className="lg-brand"><BrandMark size={36} /><span>TraceMind</span></div>
-      <div className="lg-pitch">
-        <h1>在你有权看到的资料里找答案，每一句结论都能回到原文那一页。</h1>
-        <figure aria-label="示例：回答里的结论与原文出处" className="lg-trace">
-          <div className="lg-answer">
-            <p className="lg-kicker">回答</p>
-            <p>今年没休完的年假，<Highlight>最晚可以顺延到次年 3 月 31 日，逾期作废</Highlight><CiteMarker n={1} active />。</p>
-          </div>
-          <div className="lg-thread" aria-hidden="true" />
-          <div className="lg-source tm-ev-card">
-            <p className="lg-kicker"><strong>leave-policy.md</strong><span>第 1 页，一、年假</span></p>
-            <p>4. <Highlight>当年年假因工作原因未休完的，可顺延至次年 3 月 31 日，逾期作废。</Highlight></p>
-          </div>
-        </figure>
-      </div>
+    <section className="lg-form-side" aria-label={label}>
+      <div className="lg-brand"><BrandMark size={22} /><span>TraceMind</span></div>
+      <div className="lg-inner">{children}</div>
+      <p className="lg-foot">本地优先的知识问答、文档溯源与 RAG 评测工作台</p>
     </section>
-    <section className="lg-form-side" aria-label={label}>{children}</section>
+    <section className="lg-show" aria-hidden="true">
+      <h2>在你有权看到的资料里找答案，每一句结论都能回到原文那一页。</h2>
+      <ul>{['回答逐句标注引用，点开就是原文出处', '召回链路可回放：向量、BM25、融合、重排', '平台库与个人库分开授权，审批后才入库'].map(item => <li key={item}><Check size={16} strokeWidth={2} />{item}</li>)}</ul>
+      <figure className="lg-demo">
+        <div><p className="lg-kicker">回答</p>
+          <p className="lg-answer">今年没休完的年假，<Highlight>最晚可以顺延到次年 3 月 31 日，逾期作废</Highlight><CiteMarker n={1} active />。</p></div>
+        <div className="lg-source tm-ev-card">
+          <p className="lg-kicker"><strong>leave-policy.md</strong><span>第 1 页，一、年假</span></p>
+          <p>4. <Highlight>当年年假因工作原因未休完的，可顺延至次年 3 月 31 日，逾期作废。</Highlight></p>
+        </div>
+      </figure>
+    </section>
   </main>
 }
 
 export function LoginPage() {
   const { signIn } = useAuth()
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<{ text: string; limited: boolean } | null>(null)
+  const [reveal, setReveal] = useState(false)
+  const [caps, setCaps] = useState(false)
+  const [remember, setRemember] = useState(() => !!rememberedName())
+  const [forgot, setForgot] = useState(false)
+  const password = useRef<HTMLInputElement>(null)
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault(); const form = new FormData(event.currentTarget)
-    setBusy(true); setError('')
-    try { await signIn(String(form.get('username')).trim(), String(form.get('password'))) } catch (failure) { setError(errorText(failure)) } finally { setBusy(false) }
+    const username = String(form.get('username')).trim()
+    setBusy(true); setError(null)
+    try {
+      await signIn(username, String(form.get('password')))
+      rememberName(remember ? username : null)
+    } catch (failure) {
+      setError({ text: errorText(failure), limited: failure instanceof ApiError && failure.status === 429 })
+      password.current?.focus()
+      password.current?.select()
+    } finally { setBusy(false) }
   }
+  const capsCheck = (event: KeyboardEvent<HTMLInputElement>) => setCaps(event.getModifierState('CapsLock'))
   return <AuthScreen label="登录">
     <form className="lg-form" onSubmit={event => { void submit(event) }} aria-label="登录表单">
-      <h2>登录</h2>
-      <FormField label="用户名" className="lg-field"><input className="tm-input" name="username" autoComplete="username" required maxLength={64} autoFocus /></FormField>
-      <FormField label="密码" className="lg-field"><input className="tm-input" name="password" type="password" autoComplete="current-password" required maxLength={128} placeholder="输入密码" /></FormField>
-      {error && <p className="lg-error" role="alert">{error}</p>}
-      <Button type="submit" busy={busy} className="lg-submit">登录</Button>
+      <div><h1>登录</h1><p className="tm-muted">使用管理员分配的账号登录工作台。</p></div>
+      <FormField label="用户名" className="lg-field"><input className="tm-input" name="username" autoComplete="username" required maxLength={64} autoFocus defaultValue={rememberedName()} /></FormField>
+      <div className="tm-field lg-field">
+        <label className="tm-field-label" htmlFor="login-password">密码</label>
+        <span className="lg-password">
+          <input ref={password} id="login-password" className="tm-input" name="password" type={reveal ? 'text' : 'password'} autoComplete="current-password" required maxLength={128} placeholder="输入密码"
+            onKeyUp={capsCheck} onKeyDown={capsCheck} onBlur={() => setCaps(false)} />
+          <button type="button" className="lg-reveal" aria-pressed={reveal} aria-controls="login-password" onClick={() => setReveal(value => !value)}>{reveal ? '隐藏' : '显示'}</button>
+        </span>
+        {caps && <span className="lg-caps" role="status">大写锁定已打开</span>}
+      </div>
+      <div className="lg-row">
+        <label className="tm-check-line"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} />记住账号</label>
+        <button type="button" className="tm-textlink" aria-expanded={forgot} onClick={() => setForgot(true)}>忘记密码？</button>
+      </div>
+      {error && (error.limited
+        ? <div className="tm-note" role="alert"><span>{error.text}</span></div>
+        : <div className="tm-alert" role="alert"><span>{error.text}</span></div>)}
+      <Button type="submit" busy={busy} className="lg-submit">{busy ? '登录中…' : '登录'}</Button>
+      {forgot && <p className="lg-help" role="status">请联系你的团队负责人或管理员重置密码。</p>}
     </form>
   </AuthScreen>
 }
@@ -84,7 +117,7 @@ export function ForcePasswordPage() {
   const { user, signOut } = useAuth()
   return <AuthScreen label="设置新密码">
     <div className="lg-form">
-      <h2>设置新密码</h2>
+      <h1>设置新密码</h1>
       <p className="tm-muted m-0">{user?.display_name || user?.username}，首次登录或密码被重置后，需要先设置自己的密码。</p>
       <PasswordForm submitLabel="保存并进入工作台" large />
       <button type="button" className="tm-textlink self-start" onClick={() => { void signOut() }}>退出登录</button>
@@ -96,13 +129,13 @@ export function ForcePasswordPage() {
 
 export function ProfilePage() {
   const { user } = useAuth()
-  return <Page side={<AccountSide />} title="个人资料">
+  return <Page title="个人资料">
     <FactStrip items={[{ label: '显示名', value: user?.display_name || '—' }, { label: '用户名', value: user?.username ?? '—' }, { label: '角色', value: roleLabel(user?.role) }]} />
   </Page>
 }
 
 export function PasswordPage() {
-  return <Page side={<AccountSide />} title="修改密码"><section className="tm-panel ac-narrow" aria-label="修改密码"><PasswordForm /></section></Page>
+  return <Page title="修改密码"><section className="tm-panel ac-narrow" aria-label="修改密码"><PasswordForm /></section></Page>
 }
 
 // ------------------------------------------------------------------ MCP tokens
@@ -144,11 +177,11 @@ export function TokensPage() {
     { key: 'expires', header: '到期', cell: token => <span className="tm-muted tm-num">{token.expires_at ? formatDay(token.expires_at) : '永不过期'}</span>, nowrap: true },
     { key: 'created', header: '创建', cell: token => <span className="tm-muted tm-num">{formatStamp(token.created_at)}</span>, nowrap: true },
     { key: 'status', header: '状态', cell: token => <StatusTag value={token.revoked_at ? 'revoked' : 'active'} label={token.revoked_at ? '已吊销' : '有效'} />, nowrap: true },
-    { key: 'revoke', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: token => token.revoked_at ? null
+    { key: 'revoke', header: <span className="sr-only">操作</span>, nowrap: true, cell: token => token.revoked_at ? null
       : <Button variant="danger" size="sm" aria-label={`吊销 ${token.name}`} disabled={revoke.isPending} onClick={() => { if (window.confirm(`吊销「${token.name}」？使用它的 Agent 将立即失去访问权限。`)) revoke.mutate(token.id) }}>吊销</Button> },
   ]
 
-  return <Page side={<AccountSide />} title="MCP 访问令牌" bodyClassName="ac-tokens" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建令牌</Button>}>
+  return <Page title="MCP 访问令牌" bodyClassName="ac-tokens" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建令牌</Button>}>
     {created?.token && <section className="ac-banner" aria-label="新令牌">
       <div className="ac-banner-main">
         <p className="ac-banner-title">“{created.name}”的令牌已创建，只显示这一次</p>
@@ -176,7 +209,7 @@ export function TokensPage() {
       </div>
     </section>
 
-    <section className="tm-panel ad-panel" aria-label="我的令牌">
+    <section className="tm-panel adm-panel" aria-label="我的令牌">
       <div className="ac-panel-head ac-panel-head-line"><h2>我的令牌</h2><span className="tm-faint tm-num">{rows.length}</span></div>
       {tokens.isPending ? <Loading /> : tokens.isError ? <ErrorState error={tokens.error} retry={() => { void tokens.refetch() }} />
         : <DataTable label="我的令牌" columns={columns} rows={rows} rowKey={token => token.id} minWidth={760} rowProps={token => ({ dim: !!token.revoked_at })} empty="还没有令牌" />}

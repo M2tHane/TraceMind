@@ -8,7 +8,6 @@ import { RetrievalConfigEditor } from '../components/Retrieval'
 import { Button, Empty, ErrorState, Loading, Notice } from '../components/ui'
 import { ResultView } from '../components/sources'
 import { Page } from '../components/shell/Shell'
-import { EvaluationSide } from '../components/shell/ModuleNav'
 import { FieldSelect, FormField, MethodChecks, kbOptions, methodColor } from './evalShared'
 
 interface DebugInput { knowledge_base_id: string; question: string; methods: Method[]; retrieval_only: boolean; top_k: number; candidate_k: number; reference_answer?: string; retrieval?: RetrievalConfig }
@@ -54,7 +53,7 @@ export function DebugPage() {
     const form = new FormData(event.currentTarget)
     debug.mutate({ knowledge_base_id: selectedKb, question: question.trim(), methods, retrieval_only: retrievalOnly, top_k: Number(form.get('top_k')), candidate_k: Number(form.get('candidate_k')), reference_answer: String(form.get('reference_answer') || '').trim() || undefined, retrieval: custom ? { ...custom, top_k: Math.min(custom.top_k, custom.fusion_k) } : undefined })
   }
-  return <Page side={<EvaluationSide section="retrieval" />} title="检索对比">
+  return <Page title="检索对比">
     <div className="ev-debug">
       <form className="tm-panel ev-debug-form" onSubmit={handleSubmit}>
         <div className="tm-panel-title"><h2>实验配置</h2></div>

@@ -1,89 +1,259 @@
-/* TraceMind design tokens. Yellow (hl / cite / ev) is reserved for evidence. */
+/*
+ * TraceMind design tokens, modeled on the AskData UI kit (CC Switch v7): neutral greys, black-and-white primary
+ * actions, one brand orange. Light is the default; <html data-theme="dark"> switches to dark, and with no
+ * data-theme the OS preference decides. Yellow (hl / cite / ev) is reserved for evidence.
+ * Styles reference these variables only: no raw colours, no raw radii.
+ */
 :root {
-  --tm-bg: #F3F5F1;
-  --tm-surface: #FFFFFF;
-  --tm-surface-2: #FAFBF9;
-  --tm-surface-3: #F6F7F5;
-  /* One surface for all chrome around the content: rail, module sidebars, chat list, evidence pane. */
-  --tm-rail: #F6F7F4;
-  --tm-rail-line: #D7DBD5;
-  --tm-hover: #EDF0EB;
-  --tm-ink: #18201D;
-  --tm-ink-hover: #2D3632;
-  --tm-text-2: #2C3531;
-  --tm-text-3: #3E4843;
-  --tm-muted: #56605B;
-  --tm-faint: #646E69;
-  --tm-disabled: #A3ABA6;
-  --tm-line: #D7DBD5;
-  --tm-line-soft: #E8EBE6;
-  --tm-control: #C5CBC3;
-  --tm-pine: #0E6B54;
-  --tm-pine-hover: #0A5241;
-  --tm-pine-tint: #E2EDE7;
-  --tm-pine-tint-text: #0A4F3E;
-  --tm-bubble-user: #DDE8E1;
-  --tm-bubble-user-line: #C9DAD0;
-  --tm-hl: #F5DF73;
-  --tm-cite: #F6EDC2;
-  --tm-cite-line: #E1CF7E;
-  --tm-cite-text: #5E4700;
-  --tm-cite-on: #F2D34E;
-  --tm-cite-on-line: #B99A12;
-  --tm-cite-on-text: #2E2300;
-  --tm-ev-card: #FFFDF4;
-  --tm-ev-card-line: #D9C76A;
-  --tm-badge: #6A4BC4;
-  --tm-danger: #9C1C25;
-  --tm-danger-line: #E5C3C5;
-
-  --tm-tag-neutral-bg: #ECEFEA; --tm-tag-neutral: #3E4843;
-  --tm-tag-ok-bg: #E1F0E9; --tm-tag-ok: #0A5241;
-  --tm-tag-run-bg: #E3E9FA; --tm-tag-run: #2A47A8;
-  --tm-tag-wait-bg: #EDE7F9; --tm-tag-wait: #553AA8;
-  --tm-tag-err-bg: #F8E3E4; --tm-tag-err: #9C1C25;
-  --tm-tag-warn-bg: #F1ECE4; --tm-tag-warn: #6B4A12;
-  --tm-tag-platform-bg: #E0EBEF; --tm-tag-platform: #1F4F63;
-  --tm-tag-personal-bg: #EEE8F6; --tm-tag-personal: #5A3F94;
-
-  --tm-stage-scope: #8A938E;
-  --tm-stage-vector: #3156C8;
-  --tm-stage-bm25: #B4572B;
-  --tm-stage-fusion: #6A4BC4;
-  --tm-stage-rerank: #0E6B54;
-  --tm-stage-post: #18201D;
-
-  --tm-step-done: #0E6B54;
-  --tm-step-now: #3156C8;
-  --tm-step-todo: #DDE1DB;
-  --tm-step-fail: #C2333D;
-
-  --tm-font: 'IBM Plex Sans', "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --tm-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-
-  --tm-rail-w: 64px;
-  --tm-side-w: 240px;
-  --tm-bar-h: 56px;
-  --tm-shadow-pop: 0 8px 24px rgba(24, 32, 29, .14);
-  --tm-shadow-drawer: -12px 0 32px rgba(24, 32, 29, .12);
-  --tm-motion: 160ms;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-check: 4px;
+  --radius-control: 6px;
+  --radius-seg-item: 7px;
+  --radius-panel: 10px;
+  --radius-dialog: 14px;
+  --radius-pill: 9999px;
+  --control-xs: 26px;
+  --row-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 40px;
+  --sidebar-width: 216px;
+  --rail-width: 60px;
+  --header-height: 56px;
+  --stat-height: 76px;
+  --chat-max-width: 760px;
+  --dialog-width: 520px;
+  --dialog-width-lg: 720px;
+  --drawer-width: 440px;
+  --toast-width: 340px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --motion: 160ms;
 }
-@media (prefers-reduced-motion: reduce) { :root { --tm-motion: 0ms; } }
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
 
-html, body { background: var(--tm-bg); color: var(--tm-ink); }
+:root, [data-theme="light"] {
+  --bg-app: #ffffff;
+  --bg-sidebar: #f5f5f7;
+  --bg-subtle: #efeff2;
+  --bg-selected: #e4e4ea;
+  --bg-card: #ffffff;
+  --border: #e4e4e9;
+  --border-strong: #cfcfd6;
+  --line-control: #8e8e96;
+  --text-1: #18181b;
+  --text-2: #52525b;
+  --text-3: #65656e;
+  /* Disabled text is exempt from contrast minimums; it still reads as present. */
+  --text-disabled: #a1a1aa;
+  --inverse-bg: #18181b;
+  --inverse-fg: #ffffff;
+  --action: #f97316;
+  --action-fg: #ffffff;
+  --action-text: #c2410c;
+  --action-soft: #fff1e6;
+  --focus: #c2410c;
+  --info: #0063c7;
+  --info-soft: #eaf3ff;
+  --success: #007634;
+  --success-soft: #e8f7ee;
+  --success-dot: #16a34a;
+  --warning: #a64a00;
+  --warning-soft: #fef3c7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --chart-1: #1f5f99;
+  --chart-2: #b07600;
+  --chart-3: #00866a;
+  --chart-4: #d55e00;
+  --chart-5: #3589c0;
+  --chart-grid: #ecece8;
+  --code-keyword: #0063c7;
+  --code-string: #007634;
+  --code-number: #a64a00;
+  --code-title: #7c3aed;
+  --overlay: rgba(9, 9, 11, .36);
+  --overlay-soft: rgba(9, 9, 11, .18);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, .08), 0 1px 3px rgba(16, 24, 40, .06);
+  --shadow-lg: 0 20px 40px rgba(16, 24, 40, .16), 0 4px 12px rgba(16, 24, 40, .08);
+  /* Evidence: highlighter stroke, citation markers, the selected evidence card. */
+  --hl: #f5df73;
+  --cite: #f6edc2;
+  --cite-line: #e1cf7e;
+  --cite-text: #5e4700;
+  --cite-on: #f2d34e;
+  --cite-on-line: #b99a12;
+  --cite-on-text: #2e2300;
+  --ev-card: #fffdf4;
+  --ev-card-line: #d9c76a;
+  --ev-card-divider: #efe5b5;
+  --ev-text: #6b5200;
+  /* PDF pages stay white in both themes, so their highlight does too. */
+  --pdf-bg: #e4e4e9;
+  --pdf-hl-line: #c9a920;
+  --pdf-hl-fill: rgba(242, 211, 78, .10);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg-app: #1c1c1e;
+  --bg-sidebar: #161618;
+  --bg-subtle: #26262a;
+  --bg-selected: #313136;
+  --bg-card: #2e2e33;
+  --border: #3a3a40;
+  --border-strong: #4a4a52;
+  --line-control: #7a7a84;
+  --text-1: #f4f4f5;
+  --text-2: #d0d0d8;
+  --text-3: #b5b5bd;
+  --text-disabled: #6b6b74;
+  --inverse-bg: #f4f4f5;
+  --inverse-fg: #18181b;
+  --action: #ea580c;
+  --action-fg: #ffffff;
+  --action-text: #fb923c;
+  --action-soft: #3a2213;
+  --focus: #fb923c;
+  --info: #8fb8e6;
+  --info-soft: #14263b;
+  --success: #4ade80;
+  --success-soft: #0f2b1a;
+  --success-dot: #4ade80;
+  --warning: #fcd34d;
+  --warning-soft: #3a2a05;
+  --danger: #f87171;
+  --danger-soft: #3a1414;
+  --chart-1: #5c9fe0;
+  --chart-2: #e8a93a;
+  --chart-3: #3cc0a0;
+  --chart-4: #ff8a4c;
+  --chart-5: #8fd0f5;
+  --chart-grid: #26262b;
+  --code-keyword: #8fb8e6;
+  --code-string: #4ade80;
+  --code-number: #fcd34d;
+  --code-title: #c4b5fd;
+  --overlay: rgba(0, 0, 0, .56);
+  --overlay-soft: rgba(0, 0, 0, .32);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, .45), 0 1px 3px rgba(0, 0, 0, .4);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, .6), 0 4px 12px rgba(0, 0, 0, .5);
+  --hl: #6b5a12;
+  --cite: #3a3214;
+  --cite-line: #6b5a1e;
+  --cite-text: #f2d877;
+  --cite-on: #f2d34e;
+  --cite-on-line: #f2d34e;
+  --cite-on-text: #2e2300;
+  --ev-card: #2a2716;
+  --ev-card-line: #6b5a1e;
+  --ev-card-divider: #4a4020;
+  --ev-text: #f2d877;
+  --pdf-bg: #26262a;
+  --pdf-hl-line: #c9a920;
+  --pdf-hl-fill: rgba(242, 211, 78, .10);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg-app: #1c1c1e;
+    --bg-sidebar: #161618;
+    --bg-subtle: #26262a;
+    --bg-selected: #313136;
+    --bg-card: #2e2e33;
+    --border: #3a3a40;
+    --border-strong: #4a4a52;
+    --line-control: #7a7a84;
+    --text-1: #f4f4f5;
+    --text-2: #d0d0d8;
+    --text-3: #b5b5bd;
+    --text-disabled: #6b6b74;
+    --inverse-bg: #f4f4f5;
+    --inverse-fg: #18181b;
+    --action: #ea580c;
+    --action-fg: #ffffff;
+    --action-text: #fb923c;
+    --action-soft: #3a2213;
+    --focus: #fb923c;
+    --info: #8fb8e6;
+    --info-soft: #14263b;
+    --success: #4ade80;
+    --success-soft: #0f2b1a;
+    --success-dot: #4ade80;
+    --warning: #fcd34d;
+    --warning-soft: #3a2a05;
+    --danger: #f87171;
+    --danger-soft: #3a1414;
+    --chart-1: #5c9fe0;
+    --chart-2: #e8a93a;
+    --chart-3: #3cc0a0;
+    --chart-4: #ff8a4c;
+    --chart-5: #8fd0f5;
+    --chart-grid: #26262b;
+    --code-keyword: #8fb8e6;
+    --code-string: #4ade80;
+    --code-number: #fcd34d;
+    --code-title: #c4b5fd;
+    --overlay: rgba(0, 0, 0, .56);
+    --overlay-soft: rgba(0, 0, 0, .32);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, .45), 0 1px 3px rgba(0, 0, 0, .4);
+    --shadow-lg: 0 20px 40px rgba(0, 0, 0, .6), 0 4px 12px rgba(0, 0, 0, .5);
+    --hl: #6b5a12;
+    --cite: #3a3214;
+    --cite-line: #6b5a1e;
+    --cite-text: #f2d877;
+    --cite-on: #f2d34e;
+    --cite-on-line: #f2d34e;
+    --cite-on-text: #2e2300;
+    --ev-card: #2a2716;
+    --ev-card-line: #6b5a1e;
+    --ev-card-divider: #4a4020;
+    --ev-text: #f2d877;
+    --pdf-bg: #26262a;
+    --pdf-hl-line: #c9a920;
+    --pdf-hl-fill: rgba(242, 211, 78, .10);
+    color-scheme: dark;
+  }
+}
+
+/* Roles shared by both themes: recall-chain stages and ingestion steps reuse the chart and status colours. */
+:root {
+  --stage-scope: var(--text-3);
+  --stage-vector: var(--chart-1);
+  --stage-bm25: var(--chart-4);
+  --stage-fusion: var(--chart-2);
+  --stage-rerank: var(--chart-3);
+  --stage-post: var(--text-1);
+  --step-done: var(--success-dot);
+  --step-now: var(--info);
+  --step-todo: var(--bg-selected);
+  --step-fail: var(--danger);
+}
+
+html, body { background: var(--bg-app); color: var(--text-1); }
 body {
-  margin: 0; min-width: 320px; font-family: var(--tm-font); font-size: 13px; line-height: 1.55;
-  font-synthesis: none; -webkit-font-smoothing: antialiased; caret-color: var(--tm-pine);
+  margin: 0; min-width: 320px; font-family: var(--font-sans); font-size: 13px; line-height: 20px;
+  font-synthesis: none; -webkit-font-smoothing: antialiased;
 }
 *, *::before, *::after { box-sizing: border-box; }
 button, input, textarea, select { font: inherit; color: inherit; }
-a { color: var(--tm-pine); text-decoration: none; }
-a:hover { color: var(--tm-pine-hover); }
-::selection { background: var(--tm-pine-tint); color: var(--tm-ink); }
-:focus-visible { outline: 2px solid var(--tm-pine); outline-offset: 1px; }
-code, kbd, pre, samp { font-family: var(--tm-mono); }
-td, th, .tabular-nums { font-variant-numeric: tabular-nums; }
-* { scrollbar-width: thin; scrollbar-color: #C5CBC3 transparent; }
+a { color: var(--action-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+::selection { background: var(--bg-selected); color: var(--text-1); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, kbd, pre, samp { font-family: var(--font-mono); }
+td, th, time, .tabular-nums { font-variant-numeric: tabular-nums; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; scroll-behavior: auto !important; }
 }

@@ -13,7 +13,6 @@ import {
   type LibraryDocument, type LibraryInfo,
 } from '../lib/knowledge'
 import { Select } from '../components/Select'
-import { KnowledgeListSide, KnowledgeSide, rememberKnowledgeBase, type KnowledgeFilter } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
 import {
   Button, DataTable, Empty, ErrorState, FactList, FactStrip, Field, FileTypeTag, Loading, Modal, Notice, Pager, ScopeTag, SearchableSelect, Segmented, SelectionBar,
@@ -49,7 +48,7 @@ export function KnowledgePage() {
   const navigate = useNavigate()
   const admin = useAuth().user?.role === 'admin'
   const [params, setParams] = useSearchParams()
-  const scope: KnowledgeFilter = params.get('scope') === 'platform' || params.get('scope') === 'personal' ? params.get('scope') as Scope : 'all'
+  const scope: Scope | 'all' = params.get('scope') === 'platform' || params.get('scope') === 'personal' ? params.get('scope') as Scope : 'all'
   const docView: DocView = params.get('docs') === 'failed' ? 'failed' : params.get('docs') === 'processing' ? 'processing' : 'all'
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
@@ -106,12 +105,12 @@ export function KnowledgePage() {
       {kb.document_count === 0 ? '0 份' : kb.ready_count === kb.document_count ? `${formatNumber(kb.document_count)} 份，全部就绪` : `${formatNumber(kb.ready_count)} / ${formatNumber(kb.document_count)} 已就绪`}
       {(running > 0 || broken > 0) && <span className="kb-sub">{running > 0 && <span className="kb-sub-run">{running} 份处理中</span>}{running > 0 && broken > 0 && '，'}{broken > 0 && <span className="kb-sub-err">{broken} 份失败</span>}</span>}
     </> },
-    { key: 'chunks', header: '分块', align: 'right', cell: ({ kb }) => formatNumber(kb.chunk_count) },
+    { key: 'chunks', header: '分块', cell: ({ kb }) => formatNumber(kb.chunk_count) },
     { key: 'embedding', header: 'Embedding', nowrap: true, cell: ({ kb }) => <><span className="tm-mono">{kb.embedding_model || '未配置'}</span>{kb.embedding_dimensions ? <span className="kb-sub">{kb.embedding_dimensions} 维</span> : null}</> },
     { key: 'retrieval', header: '默认检索', nowrap: true, cell: ({ kb }) => retrievalLabel(kb.retrieval_config) },
-    { key: 'pending', header: '待审批', align: 'right', cell: ({ kb }) => kb.pending_count ? <Tag tone="wait">{kb.pending_count}</Tag> : <span className="tm-faint">—</span> },
+    { key: 'pending', header: '待审批', cell: ({ kb }) => kb.pending_count ? <Tag tone="wait">{kb.pending_count}</Tag> : <span className="tm-faint">—</span> },
     { key: 'updated', header: '更新', nowrap: true, cell: row => <span className="tm-muted">{formatWhen(row.updated)}</span> },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: ({ kb }) => <Link className={buttonClass('secondary', 'sm')} to={`/chat?kb=${kb.id}`} aria-label={`去提问：${kb.name}`}>去提问</Link> },
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: ({ kb }) => <Link className={buttonClass('secondary', 'sm')} to={`/chat?kb=${kb.id}`} aria-label={`去提问：${kb.name}`}>去提问</Link> },
   ]
   const problemColumns: Column<LibraryDocument>[] = [
     { key: 'file', header: '文档', cell: doc => <span className="kb-file"><FileTypeTag filename={doc.filename} /><span className="min-w-0"><Link className="kb-file-name" to={`/knowledge/${doc.knowledge_base_id}/documents/${doc.id}`}>{doc.filename}</Link>
@@ -120,12 +119,12 @@ export function KnowledgePage() {
     { key: 'steps', header: '进度', cell: doc => { const { steps, current } = documentSteps(doc.status, doc.stage); return <StepBar steps={steps} label={`处理进度：${current}`} /> } },
     { key: 'stage', header: '当前阶段', cell: doc => { const note = stageNote(doc); return <span className={note.failed ? 'kb-sub-err' : 'kb-sub-run'} title={note.text}>{note.text.length > 46 ? `${note.text.slice(0, 46)}…` : note.text}</span> } },
     ...(hasUploaders ? [{ key: 'uploader', header: '上传者', nowrap: true, cell: (doc: LibraryDocument) => names(doc.uploaded_by) ?? '—' }] : []),
-    { key: 'elapsed', header: '已用时', align: 'right', nowrap: true, cell: doc => isProcessing(doc) ? formatElapsed(doc.created_at) : <span className="tm-faint">—</span> },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: doc => isFailed(doc) && kbById.get(doc.knowledge_base_id)?.can_manage
+    { key: 'elapsed', header: '已用时', nowrap: true, cell: doc => isProcessing(doc) ? formatElapsed(doc.created_at) : <span className="tm-faint">—</span> },
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: doc => isFailed(doc) && kbById.get(doc.knowledge_base_id)?.can_manage
       ? <Button variant="secondary" size="sm" busy={retry.isPending && retry.variables?.id === doc.id} disabled={retry.isPending} onClick={() => retry.mutate(doc)} aria-label={`重新处理 ${doc.filename}`}>重新处理</Button> : null },
   ]
 
-  return <Page side={<KnowledgeSide filter={scope} />} title="知识库" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建知识库</Button>}>
+  return <Page title="知识库" actions={<Button onClick={() => setOpen(true)}><Plus size={14} />新建知识库</Button>}>
     <div className="kb-filters">
       <label className="tm-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索知识库" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} placeholder="按名称或描述搜索" /></label>
       <Segmented label="范围" value={scope} onChange={value => setParam('scope', value === 'all' ? null : value)} items={[{ value: 'all', label: '全部' }, { value: 'platform', label: '平台', count: scopeCount('platform') }, { value: 'personal', label: '个人', count: scopeCount('personal') }]} />
@@ -181,7 +180,6 @@ function useDocumentRights(manage: boolean) {
 
 export function KnowledgeDetail() {
   const { id = '' } = useParams()
-  useEffect(() => { if (id) rememberKnowledgeBase(id) }, [id])
   const navigate = useNavigate()
   const kb = useApi<LibraryInfo>(`/knowledge-bases/${id}`, { poll: 5000 })
   const docs = useApi<Document[]>(documentsPath(id), { poll: 3000 })
@@ -251,18 +249,18 @@ export function KnowledgeDetail() {
     } },
     { key: 'status', header: '状态', nowrap: true, cell: doc => isReplacing(doc) ? <Tag tone="warn">替换中</Tag> : <StatusTag value={doc.status} /> },
     { key: 'steps', header: '进度', cell: doc => { if (['pending_review', 'rejected'].includes(doc.status)) return <span className="tm-faint">—</span>; const { steps, current } = documentSteps(doc.status, doc.stage); return <StepBar steps={steps} label={`处理进度：${current}`} /> } },
-    { key: 'pages', header: '页数', align: 'right', cell: doc => doc.page_count ? formatNumber(doc.page_count) : <span className="tm-faint">—</span> },
-    { key: 'chunks', header: '分块', align: 'right', cell: doc => doc.chunk_count ? formatNumber(doc.chunk_count) : <span className="tm-faint">—</span> },
+    { key: 'pages', header: '页数', cell: doc => doc.page_count ? formatNumber(doc.page_count) : <span className="tm-faint">—</span> },
+    { key: 'chunks', header: '分块', cell: doc => doc.chunk_count ? formatNumber(doc.chunk_count) : <span className="tm-faint">—</span> },
     ...(hasUploaders ? [{ key: 'uploader', header: '上传者', nowrap: true, cell: (doc: Document) => names(doc.uploaded_by) ?? '—' }] : []),
     { key: 'updated', header: '更新', nowrap: true, cell: doc => <span className="tm-muted">{formatWhen(doc.updated_at)}</span> },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: doc => <span className="inline-flex items-center justify-end gap-1">
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: doc => <span className="inline-flex items-center justify-end gap-1">
       {isFailed(doc) && manage && <Button variant="secondary" size="sm" busy={retry.isPending && retry.variables === doc.id} disabled={retry.isPending} onClick={() => retry.mutate(doc.id)} aria-label={`重新处理 ${doc.filename}`}>重新处理</Button>}
       {manage && doc.status === 'ready' && <Button variant="icon" aria-label={`上传新版本 ${doc.filename}`} title="上传新版本" disabled={replace.isPending} onClick={() => pickReplacement(doc.id)}><RefreshCw size={14} /></Button>}
       {removable(doc) && <Button variant="icon" aria-label={`删除 ${doc.filename}`} title={doc.review_status === 'pending' ? '撤回' : '删除'} disabled={destroy.isPending} onClick={() => confirmDelete(doc, destroy.mutate)}><Trash2 size={14} /></Button>}
     </span> },
   ]
 
-  return <Page side={<KnowledgeListSide />} title={data?.name ?? '知识库'}
+  return <Page title={data?.name ?? '知识库'} crumbs={[{ to: '/knowledge', label: '知识库' }]}
     meta={data && <><ScopeTag scope={data.scope} />{data.description && <span className="tm-muted">{data.description}</span>}</>}
     actions={data && <><Link className={buttonClass('secondary')} to={`/chat?kb=${id}`}>在问答中使用</Link>{canUpload && <Button onClick={() => setUploadOpen(true)}><Upload size={14} />上传文档</Button>}</>}>
     {kb.isError && <ErrorState error={kb.error} retry={() => { void kb.refetch() }} />}

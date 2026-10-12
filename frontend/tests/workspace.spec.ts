@@ -104,8 +104,8 @@ test('real workspace, citations, documents, evaluations and responsive layouts',
   }
   await page.goto(`/chat/${conversation.id}`)
   await expect(page.locator('.message-assistant .markdown')).toContainText('Milvus')
-  await expect(page.locator('.message-user .user-content').first()).toHaveCSS('background-color', 'rgb(221, 232, 225)')
-  await expect(page.locator('.assistant-bubble').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.locator('.message-user .user-content').first()).toHaveCSS('background-color', 'rgb(24, 24, 27)')
+  await expect(page.locator('.assistant-bubble').first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   const userBubble = await page.locator('.message-user .user-content').first().boundingBox()
   const answerBubble = await page.locator('.assistant-bubble').first().boundingBox()
   expect(userBubble!.x).toBeGreaterThan(answerBubble!.x)

@@ -1,36 +1,36 @@
 /* Memory page: table + change-history panel */
 .mem-layout { display: flex; flex-wrap: wrap; align-items: flex-start; min-width: 0; }
 .mem-main { flex: 1 1 560px; min-width: 0; }
-.mem-content { display: inline-block; min-width: 180px; font-weight: 400; max-width: 560px; overflow-wrap: anywhere; color: var(--tm-ink); }
+.mem-content { display: inline-block; min-width: 180px; font-weight: 400; max-width: 560px; overflow-wrap: anywhere; color: var(--text-1); }
 .mem-clear { display: flex; justify-content: flex-end; }
 .mem-history {
-  flex: 0 0 340px; width: 340px; position: sticky; top: 0; align-self: flex-start; height: calc(100dvh - var(--tm-bar-h)); overflow-y: auto;
-  background: var(--tm-surface); border-left: 1px solid var(--tm-line); padding: 0 20px 24px;
+  flex: 0 0 340px; width: 340px; position: sticky; top: 0; align-self: flex-start; height: calc(100dvh - var(--header-height)); overflow-y: auto;
+  background: var(--bg-card); border-left: 1px solid var(--border); padding: 0 20px 24px;
 }
 .mem-history-head { display: flex; align-items: center; justify-content: space-between; height: 48px; margin-top: 4px; }
 .mem-history-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.mem-history-card { padding: 12px; border-radius: 6px; background: var(--tm-surface-3); margin-bottom: 18px; }
+.mem-history-card { padding: 12px; border-radius: var(--radius-panel); background: var(--bg-subtle); margin-bottom: 18px; }
 .mem-history-card p { margin: 0 0 6px; overflow-wrap: anywhere; }
-.mem-history-card span { font-size: 12px; color: var(--tm-faint); }
+.mem-history-card span { font-size: 12px; color: var(--text-3); }
 .mem-timeline { list-style: none; margin: 0; padding: 0; position: relative; }
 .mem-timeline li { position: relative; padding: 0 0 18px 22px; }
-.mem-timeline li::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: -2px; width: 1px; background: var(--tm-control); }
+.mem-timeline li::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: -2px; width: 1px; background: var(--border-strong); }
 .mem-timeline li:last-child::before { display: none; }
-.mem-dot { position: absolute; left: 0; top: 5px; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--tm-faint); background: var(--tm-surface); }
-.mem-timeline li[data-latest] .mem-dot { background: var(--tm-ink); border-color: var(--tm-ink); }
+.mem-dot { position: absolute; left: 0; top: 5px; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--text-3); background: var(--bg-card); }
+.mem-timeline li[data-latest] .mem-dot { background: var(--inverse-bg); border-color: var(--text-1); }
 .mem-event { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
-.mem-event span { font-size: 12px; color: var(--tm-faint); }
-.mem-change { margin-top: 8px; border: 1px solid var(--tm-line-soft); border-radius: 4px; overflow: hidden; }
+.mem-event span { font-size: 12px; color: var(--text-3); }
+.mem-change { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-control); overflow: hidden; }
 .mem-diffs { display: flex; flex-direction: column; }
 .mem-diff { margin: 0; display: flex; gap: 6px; padding: 5px 10px; overflow-wrap: anywhere; }
-.mem-diff-del { background: #FBEDED; color: var(--tm-danger); }
-.mem-diff-add { background: #E7F2EC; color: var(--tm-pine-hover); }
+.mem-diff-del { background: var(--danger-soft); color: var(--danger); }
+.mem-diff-add { background: var(--success-soft); color: var(--success); }
 .mem-diff mark { background: transparent; color: inherit; font-weight: 600; }
-.mem-diff-del mark { text-decoration: line-through; background: rgba(156, 28, 37, .12); }
-.mem-diff-add mark { background: rgba(14, 107, 84, .14); }
-.mem-fields { padding: 6px 10px; font-size: 12px; color: var(--tm-text-3); }
+.mem-diff-del mark { text-decoration: line-through; background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.mem-diff-add mark { background: color-mix(in srgb, var(--success) 16%, transparent); }
+.mem-fields { padding: 6px 10px; font-size: 12px; color: var(--text-2); }
 .mem-fields p { margin: 0; }
-.mem-note { margin: 6px 0 0; font-size: 12px; color: var(--tm-muted); overflow-wrap: anywhere; }
+.mem-note { margin: 6px 0 0; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
 .mem-merge-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.mem-merge-list li { padding: 8px 10px; border: 1px solid var(--tm-line-soft); border-radius: 4px; background: var(--tm-surface-2); overflow-wrap: anywhere; }
-@media (max-width: 1023px) { .mem-history { flex-basis: 100%; width: 100%; position: static; height: auto; border-left: 0; border-top: 1px solid var(--tm-line); } }
+.mem-merge-list li { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg-subtle); overflow-wrap: anywhere; }
+@media (max-width: 1023px) { .mem-history { flex-basis: 100%; width: 100%; position: static; height: auto; border-left: 0; border-top: 1px solid var(--border); } }

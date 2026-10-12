@@ -7,7 +7,6 @@ import { ApiError, formatNumber, patch, post, remove, useAction, useApi } from '
 import { useAuth } from '../lib/auth'
 import { formatDateTime, formatWhen, useAccountNames } from '../lib/knowledge'
 import { MEMORY_CATEGORIES, memoryCategoryLabel, type Memory, type MemoryCategory, type MemoryEvent, type MemorySearchResult, type Page as Paged } from '../lib/types'
-import { MemorySide } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
 import { Button, DataTable, Empty, ErrorState, FactStrip, Field, ImportanceMeter, Loading, Modal, Notice, Pager, SearchableSelect, Segmented, SelectionBar, StatusTag, Tag } from '../components/ui'
 import type { Column, TagTone } from '../components/ui'
@@ -168,11 +167,11 @@ function MemoryList() {
     </> },
     { key: 'category', header: '类别', nowrap: true, cell: memory => <Tag tone={CATEGORY_TONES[memory.category] ?? 'neutral'}>{memoryCategoryLabel(memory.category)}</Tag> },
     { key: 'importance', header: '重要度', nowrap: true, cell: memory => <ImportanceMeter value={memory.importance} /> },
-    { key: 'hits', header: '命中', align: 'right', cell: memory => memory.access_count },
+    { key: 'hits', header: '命中', cell: memory => memory.access_count },
     { key: 'source', header: '来源', nowrap: true, cell: memory => sourceLabel(memory.source) },
     { key: 'version', header: '版本', nowrap: true, cell: memory => `v${memory.version}` },
     { key: 'updated', header: '更新', nowrap: true, cell: memory => <span className="tm-muted">{formatWhen(memory.updated_at)}</span> },
-    { key: 'actions', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: memory => <span className="inline-flex items-center justify-end gap-1">
+    { key: 'actions', header: <span className="sr-only">操作</span>, nowrap: true, cell: memory => <span className="inline-flex items-center justify-end gap-1">
       {memory.status === 'active' && <>
         <Button variant="icon" aria-label="编辑" title="编辑" onClick={() => setDialog({ kind: 'edit', memory })}><Pencil size={14} /></Button>
         <Button variant="icon" aria-label="删除" title="删除" onClick={() => del.mutate({ id: memory.id, hard: false })}><Trash2 size={14} /></Button></>}
@@ -182,7 +181,7 @@ function MemoryList() {
     </span> },
   ]
 
-  return <Page bare side={<MemorySide />} title="我的记忆" actions={<>
+  return <Page bare title="我的记忆" actions={<>
     <Button variant="secondary" onClick={() => { setExtracted(null); setDialog({ kind: 'extract' }) }}><Sparkles size={14} />从对话中提取</Button>
     <Button onClick={() => setDialog({ kind: 'add' })}><Plus size={14} />添加记忆</Button></>}>
     <div className="mem-layout">
@@ -278,13 +277,13 @@ export function MemoryConsolidationPage() {
     { key: 'status', header: '状态', nowrap: true, cell: item => <StatusTag value={item.status} label={RUN_LABELS[item.status]} /> },
     { key: 'started', header: '开始', nowrap: true, cell: item => <span className="tm-muted">{formatDateTime(item.started_at)}</span> },
     { key: 'finished', header: '结束', nowrap: true, cell: item => item.finished_at ? <span className="tm-muted">{formatDateTime(item.finished_at)}</span> : <span className="tm-faint">—</span> },
-    { key: 'users', header: '处理用户', align: 'right', cell: item => formatNumber(item.users_processed) },
-    { key: 'merged', header: '合并', align: 'right', cell: item => formatNumber(item.memories_merged) },
-    { key: 'archived', header: '归档', align: 'right', cell: item => formatNumber(item.memories_archived) },
+    { key: 'users', header: '处理用户', cell: item => formatNumber(item.users_processed) },
+    { key: 'merged', header: '合并', cell: item => formatNumber(item.memories_merged) },
+    { key: 'archived', header: '归档', cell: item => formatNumber(item.memories_archived) },
     { key: 'error', header: '错误', cell: item => item.error ? <span className="kb-sub-err break-words">{item.error}</span> : <span className="tm-faint">—</span> },
   ]
 
-  return <Page side={<MemorySide />} title="自动整理" meta={running && <Tag tone="run">运行中</Tag>}
+  return <Page title="自动整理" meta={running && <Tag tone="run">运行中</Tag>}
     actions={<Button busy={run.isPending} disabled={running} onClick={trigger}>立即整理</Button>}>
     {data.isError ? <ErrorState error={data.error} retry={() => { void data.refetch() }} /> : data.isPending ? <Loading /> : <>
       {settings && <FactStrip items={[
@@ -300,7 +299,7 @@ export function MemoryConsolidationPage() {
         <DataTable label="超过阈值的用户" rows={data.data.users_over_threshold} rowKey={item => item.user_id} empty="没有用户超过阈值"
           columns={[
             { key: 'user', header: '用户', cell: item => names(item.user_id.replace(/^user:/, '')) ?? item.user_id },
-            { key: 'active', header: '有效记忆', align: 'right', cell: item => `${formatNumber(item.active)} 条` },
+            { key: 'active', header: '有效记忆', cell: item => `${formatNumber(item.active)} 条` },
           ]} />
       </section>
       <section className="tm-panel" aria-label="最近运行">

@@ -9,7 +9,7 @@
 - **平台级与个人级**：知识库分平台（全员可用、管理员维护）与个人（仅本人，管理员也看不到），员工往平台库上传文档要管理员审批；长期记忆只属于本人，供 MCP Agent 使用。
 - **审计**：管理员可查看查询日志（平台库记录问题原文，个人库只记元数据）和 MCP 调用日志（参数只留编号与长度）。
 - **MCP**：Streamable HTTP + stdio，个人访问令牌鉴权，28 个工具覆盖召回、文档上传/更新/删除、记忆增删改查与合并、审批与调优。
-- **界面**：深色侧栏 + 浅色工作区，蓝色只用于操作，青绿色只用于证据（引用、来源、就绪进度）；召回链路按阶段着色并显示耗时占比，文档处理显示五步进度，管理员侧栏显示待审批数量，账户页可一键复制 MCP 客户端配置。
+- **界面**：参照 AskData UI kit（CC Switch v7 风格）：中性灰白为底，黑白做主操作，品牌橙只用于标记、开关和焦点环；黄色只留给证据（引用、高亮、选中的证据卡）。系统字体栈、13px 正文，浅色 / 深色 / 跟随系统三种主题（侧栏底部切换）。216px 单侧栏：问答、知识库、记忆在上，评测、审批、员工账号、审计日志、设置平铺在下，侧栏不显示数字；模块子页是页头下的下划线 Tab。表格一律左对齐、数字等宽；列表卡片撑到距窗口底边 120px，超过一页才出现分页条（页码、省略号、跳至）；通知是右下角 4 秒自动消失的卡片；设置页有未保存的修改时，离开前询问「放弃并离开 / 继续编辑 / 保存并离开」。对话页提问为右侧深色气泡，回答为左侧正文，召回链路按阶段着色并显示耗时占比，账户页可一键复制 MCP 客户端配置。
 - **工程化**：PostgreSQL 持久任务队列，零停机文档替换，Alembic 迁移；后端 359 个测试（含真实 PostgreSQL + Milvus 的端到端测试），前端 Playwright 回归。
 
 ## 目录
@@ -65,7 +65,7 @@ flowchart LR
   G --> L[查询日志 · retrieval_trace]
 ```
 
-技术栈：Python 3.13 · FastAPI · SQLAlchemy 2 (async) · Alembic · PostgreSQL · Milvus 2.6 · MinerU 3 · MCP Python SDK；React 18 · TypeScript · Vite · TanStack Query · Radix UI · PDF.js。
+技术栈：Python 3.13 · FastAPI · SQLAlchemy 2 (async) · Alembic · PostgreSQL · Milvus 2.6 · MinerU 3 · MCP Python SDK；React 18 · TypeScript · Vite · TanStack Query · Radix UI · PDF.js；样式只引用 `frontend/src/styles/tokens.css` 中的设计令牌（浅色 / 深色两套取值）。
 
 ## 核心技术方案
 

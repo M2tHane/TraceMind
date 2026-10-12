@@ -6,7 +6,7 @@ import { formatNumber } from '../lib/api'
 import { formatMs } from '../lib/trace'
 import { markedCitations, stripMarkers } from '../lib/citeMarkers'
 import { Markdown } from './sources'
-import { BrandMark, CiteMarker, ErrorState } from './ui'
+import { CiteMarker, ErrorState } from './ui'
 
 export function distinctCitations(citations: Citation[]): Citation[] {
   return [...new Map(citations.map(c => [`${c.document_id}:${c.id}:${c.page}`, c])).values()]
@@ -34,7 +34,7 @@ function Pending({ message }: { message: Message }) {
 
 export interface MessageEvidence { active: boolean; citation: number; onCite: (index: number) => void; onSources: () => void; onTrace: () => void }
 
-export function ChatMessage({ message, initial = '我', evidence }: { message: Message; initial?: string; evidence?: MessageEvidence }) {
+export function ChatMessage({ message, evidence }: { message: Message; evidence?: MessageEvidence }) {
   const [copied, setCopied] = useState(false)
   const assistant = message.role === 'assistant'
   const citations = distinctCitations(message.citations ?? [])
@@ -55,13 +55,11 @@ export function ChatMessage({ message, initial = '我', evidence }: { message: M
     }
   }
   if (!assistant) return <article className="message message-user">
-    <span className="chat-avatar" aria-hidden="true">{initial}</span>
     <div className="message-body"><span className="sr-only">你</span><p className="user-content">{message.content}</p><MessageTime value={message.created_at} /></div>
   </article>
   const pending = ['queued', 'processing'].includes(message.status)
   const snapshot = message.model_snapshot
   return <article className="message message-assistant" data-active={evidence?.active || undefined}>
-    <span className="chat-avatar" aria-hidden="true"><BrandMark size={14} tile={false} /></span>
     <div className="message-body">
       <span className="sr-only">回答</span>
       {pending ? <Pending message={message} />

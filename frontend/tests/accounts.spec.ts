@@ -73,10 +73,12 @@ test('sign in, forced password change and employee navigation', async ({ page })
   await expect(nav.getByRole('link', { name: '评测实验' })).toHaveCount(0)
   await expect(nav.getByRole('link', { name: '管理' })).toHaveCount(0)
   await expect(nav.getByRole('link', { name: '环境设置' })).toHaveCount(0)
-  // Libraries are one table now: the platform and personal groups are the sidebar entries and the scope tag of each row.
-  const side = page.getByRole('navigation', { name: '知识库导航' })
-  await expect(side.getByRole('link', { name: /平台知识库/ })).toBeVisible()
-  await expect(side.getByRole('link', { name: /我的知识库/ })).toBeVisible()
+  // Employees have no governance entries; the platform / personal split is the scope filter and each row's scope tag.
+  await expect(nav.getByRole('link', { name: '审批' })).toHaveCount(0)
+  await expect(nav.getByRole('link', { name: '设置' })).toHaveCount(0)
+  const scope = page.getByRole('group', { name: '范围' })
+  await expect(scope.getByRole('button', { name: /平台/ })).toBeVisible()
+  await expect(scope.getByRole('button', { name: /个人/ })).toBeVisible()
   await expect(page.getByRole('row', { name: /员工手册.*平台/ })).toBeVisible()
   await expect(page.getByRole('row', { name: /Alice 的笔记.*个人/ })).toBeVisible()
 
@@ -131,7 +133,8 @@ for (const width of [375, 1440]) {
     await page.getByRole('button', { name: '完成' }).click()
     await expectNoPageOverflow(page)
 
-    await page.getByRole('link', { name: '查询日志' }).click()
+    await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '审计日志' }).click()
+    await expect(page.getByRole('navigation', { name: '审计日志导航' }).getByRole('link', { name: '查询日志' })).toHaveAttribute('aria-current', 'page')
     await expect(page.getByText('年假怎么申请？')).toBeVisible()
     await expect(page.getByText('个人库，不记录原文（12 字）')).toBeVisible()
     await expectNoPageOverflow(page)

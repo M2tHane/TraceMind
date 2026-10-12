@@ -24,10 +24,10 @@ export const formatCount = (value: number | null | undefined): string => value =
 
 /** Colour per retrieval method, shared with the recall-trace palette. */
 export const METHOD_COLORS: Record<string, string> = {
-  bm25: 'var(--tm-stage-bm25)', vector: 'var(--tm-stage-vector)', hybrid: 'var(--tm-stage-fusion)',
-  hybrid_rerank: 'var(--tm-stage-rerank)', no_context: 'var(--tm-stage-scope)', custom: 'var(--tm-stage-post)',
+  bm25: 'var(--stage-bm25)', vector: 'var(--stage-vector)', hybrid: 'var(--stage-fusion)',
+  hybrid_rerank: 'var(--stage-rerank)', no_context: 'var(--stage-scope)', custom: 'var(--stage-post)',
 }
-export const methodColor = (method: string): string => METHOD_COLORS[method] ?? 'var(--tm-stage-scope)'
+export const methodColor = (method: string): string => METHOD_COLORS[method] ?? 'var(--stage-scope)'
 
 export function useNames() {
   const kbs = useApi<KnowledgeBase[]>('/knowledge-bases')

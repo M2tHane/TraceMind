@@ -71,7 +71,8 @@ for (const width of [375, 1440]) {
     await page.goto('/evaluation')
     await expect(page.getByRole('heading', { name: '批量评测', exact: true })).toBeVisible()
     await expect(page.getByRole('main').getByRole('link', { name: '混合对比' })).toBeVisible()
-    await expect(page.getByRole('navigation', { name: '分页' })).toContainText('共 1 个')
+    // One run fits on one page, so there is no pager.
+    await expect(page.getByRole('navigation', { name: '分页' })).toHaveCount(0)
     await expectNoPageOverflow(page)
 
     await page.goto('/evaluation/runs/run-1')

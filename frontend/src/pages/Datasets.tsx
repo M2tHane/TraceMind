@@ -7,7 +7,6 @@ import { api, formatDate, post, useAction, useApi } from '../lib/api'
 import type { Dataset, Evidence, Question, QuestionFields } from '../lib/types'
 import { Button, DataTable, Drawer, Empty, ErrorState, FactStrip, JsonDetails, Loading, Pager, Segmented, StatusTag, Tag, type Column } from '../components/ui'
 import { Page } from '../components/shell/Shell'
-import { EvaluationSide } from '../components/shell/ModuleNav'
 import { FormField, MenuPopover } from './evalShared'
 
 function NewDatasetDrawer({ pending, error, onSubmit, onClose }: { pending: boolean; error: Error | null; onSubmit: (body: { name: string; description: string }) => void; onClose: () => void }) {
@@ -37,21 +36,21 @@ export function DatasetsPage() {
   const current = Math.min(page, Math.max(1, Math.ceil(visible.length / pageSize)))
   const columns: Column<Dataset>[] = [
     { key: 'name', header: '题集', cell: dataset => <><Link to={`/evaluation/datasets/${dataset.id}`} className="tm-linkbtn">{dataset.name}</Link>{dataset.description && <span className="tm-table-sub ev-clamp">{dataset.description}</span>}</> },
-    { key: 'count', header: '题数', align: 'right', nowrap: true, width: 90, cell: dataset => <span className="tm-num">{dataset.question_count}</span> },
+    { key: 'count', header: '题数', nowrap: true, width: 90, cell: dataset => <span className="tm-num">{dataset.question_count}</span> },
     { key: 'created', header: '创建时间', nowrap: true, width: 140, cell: dataset => <span className="tm-faint tm-num">{formatDate(dataset.created_at)}</span> },
   ]
   const actions = <>
     <Button variant="secondary" busy={example.isPending} onClick={() => example.mutate(undefined)}><Download size={14} />导入 100 题示例</Button>
     <Button onClick={() => setOpen(true)}><Plus size={15} />新建题集</Button>
   </>
-  return <Page side={<EvaluationSide section="datasets" />} title="评测题集" actions={actions}>
+  return <Page title="评测题集" actions={actions}>
     {query.isPending ? <Loading /> : query.isError ? <ErrorState error={query.error} retry={() => { void query.refetch() }} /> : !all.length
       ? <div className="tm-panel"><Empty title="还没有题集" description="手动添加问题，或导入 JSONL、CSV 文件。" action={<Button onClick={() => setOpen(true)}><Plus size={15} />新建题集</Button>} /></div>
       : <>
         <div className="ev-filter">
           <label className="tm-search ev-search"><Search size={14} aria-hidden="true" /><input aria-label="搜索题集" placeholder="搜索题集" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} /></label>
         </div>
-        <div className="tm-panel">
+        <div className="tm-panel tm-listcard">
           <DataTable label="评测题集" columns={columns} rows={visible.slice((current - 1) * pageSize, current * pageSize)} rowKey={dataset => dataset.id} minWidth={560}
             onRowClick={dataset => navigate(`/evaluation/datasets/${dataset.id}`)} empty="没有符合条件的题集" />
           <Pager total={visible.length} page={current} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} unit="个" />
@@ -130,17 +129,17 @@ export function DatasetDetail() {
   const editing = editor && editor !== 'new' ? all.find(item => item.id === editor) : undefined
   const editIndex = editing ? filtered.findIndex(item => item.id === editing.id) : -1
   const columns: Column<Question>[] = [
-    { key: 'n', header: '序号', align: 'right', width: 56, cell: (_question, index) => <span className="tm-faint tm-num">{(current - 1) * pageSize + index + 1}</span> },
+    { key: 'n', header: '序号', width: 56, cell: (_question, index) => <span className="tm-faint tm-num">{(current - 1) * pageSize + index + 1}</span> },
     { key: 'question', header: '问题', cell: question => <><button type="button" className="tm-linkbtn ev-q" onClick={() => setEditor(question.id)}>{question.question}</button>{question.reference_answer && <span className="tm-table-sub ev-clamp">{question.reference_answer}</span>}</> },
     { key: 'labels', header: '标注', nowrap: true, cell: question => <><Tag tone={question.answerable ? 'neutral' : 'warn'}>{question.answerable ? '可回答' : '不可回答'}</Tag><span className="tm-table-sub tm-num">{question.evidence?.length ?? 0} 条证据</span></> },
     { key: 'review', header: '审核状态', nowrap: true, cell: question => <StatusTag value={question.review_status} label={question.review_status === 'reviewed' ? '已审核' : '待审核'} /> },
-    { key: 'edit', header: <span className="sr-only">操作</span>, align: 'right', nowrap: true, cell: (question, index) => <button type="button" className="tm-textlink" aria-label={`编辑问题 ${(current - 1) * pageSize + index + 1}`} onClick={() => setEditor(question.id)}>编辑</button> },
+    { key: 'edit', header: <span className="sr-only">操作</span>, nowrap: true, cell: (question, index) => <button type="button" className="tm-textlink" aria-label={`编辑问题 ${(current - 1) * pageSize + index + 1}`} onClick={() => setEditor(question.id)}>编辑</button> },
   ]
   const actions = <>
     <Button variant="secondary" onClick={() => setImportOpen(true)}><Upload size={14} />导入文件</Button>
     <Button onClick={() => setEditor('new')}><Plus size={15} />添加问题</Button>
   </>
-  return <Page side={<EvaluationSide section="datasets" />} title={dataset?.name ?? '题集'} crumbs={[{ to: '/evaluation/datasets', label: '评测题集' }]} actions={actions}
+  return <Page title={dataset?.name ?? '题集'} crumbs={[{ to: '/evaluation/datasets', label: '评测题集' }]} actions={actions}
     meta={dataset?.description ? <span className="tm-muted ev-desc">{dataset.description}</span> : undefined}>
     {questions.isPending ? <Loading /> : questions.isError ? <ErrorState error={questions.error} retry={() => { void questions.refetch() }} /> : <>
       <FactStrip items={[

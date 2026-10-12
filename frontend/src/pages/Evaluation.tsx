@@ -10,7 +10,6 @@ import {
 } from '../components/ui'
 import { Markdown, ResultView } from '../components/sources'
 import { Page } from '../components/shell/Shell'
-import { EvaluationSide } from '../components/shell/ModuleNav'
 import { FieldSelect, FormField, MethodChecks, datasetOptions, formatCount, formatMs, kbOptions, methodColor, pct, useNames } from './evalShared'
 
 interface RunInput { name: string; knowledge_base_id: string; dataset_id: string; methods: Method[]; limit: number; judge_enabled: boolean }
@@ -80,7 +79,7 @@ export function RunsPage() {
     { key: 'created', header: '创建时间', nowrap: true, cell: run => <span className="tm-faint tm-num">{formatDate(run.created_at)}</span> },
   ]
   const newRun = <Button onClick={() => setOpen(true)}><Plus size={15} />新建评测</Button>
-  return <Page side={<EvaluationSide section="runs" />} title="批量评测" actions={newRun}>
+  return <Page title="批量评测" actions={newRun}>
     {runs.isPending ? <Loading /> : runs.isError ? <ErrorState error={runs.error} retry={() => { void runs.refetch() }} /> : !all.length
       ? <div className="tm-panel"><Empty title="还没有评测" description="选择知识库和题集，用同一批问题比较不同检索方法。" action={newRun} /></div>
       : <>
@@ -92,7 +91,7 @@ export function RunsPage() {
           ]} />
           <SearchableSelect label="知识库" options={kbChoices} value={kbId} onChange={value => { setKbId(value); setPage(1) }} allLabel="全部" />
         </div>
-        <div className="tm-panel">
+        <div className="tm-panel tm-listcard">
           <DataTable label="评测运行" columns={columns} rows={visible.slice((current - 1) * pageSize, current * pageSize)} rowKey={run => run.id} minWidth={920}
             onRowClick={run => navigate(`/evaluation/runs/${run.id}`)} empty="没有符合条件的评测" />
           <Pager total={visible.length} page={current} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} unit="个" />
@@ -137,7 +136,7 @@ function UsageTable({ methods, by }: { methods: string[]; by: Record<string, Sum
   ]
   const columns: Column<(typeof rows)[number]>[] = [
     { key: 'label', header: '', cell: row => row.label },
-    ...methods.map(method => ({ key: method, header: methodLabel(method), align: 'right' as const, nowrap: true, cell: (row: (typeof rows)[number]) => <span className="tm-num">{by[method] ? row.value(by[method]) : '—'}</span> })),
+    ...methods.map(method => ({ key: method, header: methodLabel(method), nowrap: true, cell: (row: (typeof rows)[number]) => <span className="tm-num">{by[method] ? row.value(by[method]) : '—'}</span> })),
   ]
   return <DataTable className="ev-mini" label="耗时与用量" columns={columns} rows={rows} rowKey={row => row.key} />
 }
@@ -213,13 +212,13 @@ export function RunDetail() {
   const running = !!data && ['queued', 'running'].includes(data.status)
 
   const columns: Column<QuestionRow>[] = [
-    { key: 'n', header: '#', align: 'right', width: 48, cell: (_row, index) => <span className="tm-faint tm-num">{(current - 1) * pageSize + index + 1}</span> },
+    { key: 'n', header: '#', width: 48, cell: (_row, index) => <span className="tm-faint tm-num">{(current - 1) * pageSize + index + 1}</span> },
     { key: 'question', header: '问题', cell: row => <><button type="button" className="tm-linkbtn ev-q" onClick={() => setInspectId(row.id)}>{row.question}</button>{row.judgeFailed && <span className="tm-table-sub ev-fail">裁判调用失败</span>}</> },
     ...methods.flatMap((method): Column<QuestionRow>[] => [
-      { key: `${method}-hit`, header: '证据进前 5', align: 'center', nowrap: true, cell: row => hitCell(row.byMethod.get(method)) },
-      { key: `${method}-f1`, header: 'Token F1', align: 'right', nowrap: true, cell: row => <span className="tm-num">{pct(f1Of(row.byMethod.get(method)), 0)}</span> },
+      { key: `${method}-hit`, header: '证据进前 5', nowrap: true, cell: row => hitCell(row.byMethod.get(method)) },
+      { key: `${method}-f1`, header: 'Token F1', nowrap: true, cell: row => <span className="tm-num">{pct(f1Of(row.byMethod.get(method)), 0)}</span> },
     ]),
-    { key: 'compare', header: <span className="sr-only">对比召回</span>, align: 'right', nowrap: true, cell: row => <Link className="tm-textlink" to={`/evaluation/retrieval?${new URLSearchParams({ kb: data?.knowledge_base_id ?? '', q: row.question })}`}>对比召回</Link> },
+    { key: 'compare', header: <span className="sr-only">对比召回</span>, nowrap: true, cell: row => <Link className="tm-textlink" to={`/evaluation/retrieval?${new URLSearchParams({ kb: data?.knowledge_base_id ?? '', q: row.question })}`}>对比召回</Link> },
   ]
   const actions = data && <>
     {running && <Button variant="secondary" busy={control.isPending} onClick={() => control.mutate('pause')}>暂停</Button>}
@@ -267,7 +266,7 @@ export function RunDetail() {
     </section>
     <JsonDetails value={{ config: data.config, summary: data.summary }} label="运行快照" />
   </>
-  return <Page side={<EvaluationSide section="runs" />} title={data?.name ?? '评测运行'} crumbs={[{ to: '/evaluation', label: '批量评测' }]} meta={data && <StatusTag value={data.status} />} actions={actions}>
+  return <Page title={data?.name ?? '评测运行'} crumbs={[{ to: '/evaluation', label: '批量评测' }]} meta={data && <StatusTag value={data.status} />} actions={actions}>
     {body}
     <Drawer open={!!inspectId} onOpenChange={open => { if (!open) setInspectId(null) }} title="逐题检查" width={760}
       position={inspectIndex >= 0 ? `${inspectIndex + 1} / ${visible.length}` : undefined}

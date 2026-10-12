@@ -55,11 +55,11 @@ function CandidateTable({ columns, topK }: { columns: RankColumn[]; topK?: numbe
       <Segmented size="sm" label="候选阶段" value={column.key} onChange={setKey} items={columns.map(item => ({ value: item.key, label: item.label }))} /></div>
     <DataTable compact className="trace-table" rows={column.candidates} rowKey={c => c.id} rowProps={c => ({ dim: !!topK && c.rank > topK })} label={`${column.label}候选`}
       columns={[
-        { key: 'rank', header: '名次', align: 'right', width: 48, cell: c => c.rank },
+        { key: 'rank', header: '名次', width: 48, cell: c => c.rank },
         { key: 'chunk', header: '分块', nowrap: true, cell: c => candidateLabel(c) },
         ...(column.candidates.some(c => c.text) ? [{ key: 'text', header: '内容', cell: (c: TraceCandidate) => <span className="trace-excerpt" title={c.text}>{c.text}</span> }] : []),
-        { key: 'score', header: scoreName, align: 'right', cell: c => c.score.toFixed(3) },
-        ...(previous ? [{ key: 'delta', header: `较${columns[index - 1].label}`, align: 'right' as const, nowrap: true, cell: (c: { id: string; rank: number }) => {
+        { key: 'score', header: scoreName, cell: c => c.score.toFixed(3) },
+        ...(previous ? [{ key: 'delta', header: `较${columns[index - 1].label}`, nowrap: true, cell: (c: { id: string; rank: number }) => {
           const before = previous.get(c.id)
           if (before === undefined) return <span className="tm-faint">新进入</span>
           const delta = before - c.rank

@@ -6,7 +6,6 @@ import { api, formatDate, post, useAction, useApi } from '../lib/api'
 import type { KnowledgeBase, LeaderboardRow, TuningPresets, TuningRun } from '../lib/types'
 import { Button, DataTable, Drawer, Empty, ErrorState, FactStrip, Loading, Pager, SearchableSelect, Segmented, StatusTag, Tag, type Column } from '../components/ui'
 import { Page } from '../components/shell/Shell'
-import { EvaluationSide } from '../components/shell/ModuleNav'
 import {
   FieldSelect, FormField, MenuPopover, OBJECTIVE_LABELS, changedKeys, configChanges, configSummary, datasetOptions, downloadJson, kbOptions, objectiveLabel, pct, sameConfig, useNames,
 } from './evalShared'
@@ -101,13 +100,13 @@ export function TuningPage() {
     { key: 'kb', header: '知识库', cell: run => kbName(run.knowledge_base_id) },
     { key: 'dataset', header: '题集', cell: run => <>{datasetName(run.dataset_id)}<span className="tm-table-sub">{run.question_count} 题</span></> },
     { key: 'objective', header: '目标指标', nowrap: true, cell: run => objectiveLabel(run.objective) },
-    { key: 'candidates', header: '候选配置', align: 'right', nowrap: true, cell: run => <span className="tm-num">{run.candidates.length} 组</span> },
+    { key: 'candidates', header: '候选配置', nowrap: true, cell: run => <span className="tm-num">{run.candidates.length} 组</span> },
     { key: 'progress', header: '进度', nowrap: true, cell: run => <><span className="tm-num">{run.completed + run.failed} / {run.total}</span>{run.failed > 0 && <span className="tm-table-sub ev-fail">失败 {run.failed}</span>}</> },
     { key: 'best', header: '最优配置', cell: run => run.best ? <><span className="tm-mono ev-name">{run.best.name}</span><span className="tm-table-sub tm-num">{objectiveLabel(run.objective)} {pct(objectiveValue(run.best, run.objective))}</span></> : <span className="tm-faint">—</span> },
     { key: 'created', header: '创建时间', nowrap: true, cell: run => <span className="tm-faint tm-num">{formatDate(run.created_at)}</span> },
   ]
   const newTask = <Button onClick={() => setOpen(true)}><Plus size={15} />新建调优</Button>
-  return <Page side={<EvaluationSide section="tuning" />} title="检索调优" actions={newTask}>
+  return <Page title="检索调优" actions={newTask}>
     {runs.isPending ? <Loading /> : runs.isError ? <ErrorState error={runs.error} retry={() => { void runs.refetch() }} /> : !all.length
       ? <div className="tm-panel"><Empty title="还没有调优任务" description="选择知识库和带证据的题集，比较多组召回参数。" action={newTask} /></div>
       : <>
@@ -119,7 +118,7 @@ export function TuningPage() {
           ]} />
           <SearchableSelect label="知识库" options={kbChoices} value={kbId} onChange={value => { setKbId(value); setPage(1) }} allLabel="全部" />
         </div>
-        <div className="tm-panel">
+        <div className="tm-panel tm-listcard">
           <DataTable label="调优任务" columns={columns} rows={visible.slice((current - 1) * pageSize, current * pageSize)} rowKey={run => run.id} minWidth={980}
             onRowClick={run => navigate(`/evaluation/tuning/${run.id}`)} empty="没有符合条件的任务" />
           <Pager total={visible.length} page={current} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} unit="个" />
@@ -191,7 +190,7 @@ export function TuningDetail() {
   const done = data ? data.completed + data.failed : 0
   const current = kb.data
   const columns: Column<BoardRow>[] = data ? [
-    { key: 'rank', header: '名次', align: 'right', width: 56, cell: row => <strong className="tm-num">{row.rank}</strong> },
+    { key: 'rank', header: '名次', width: 56, cell: row => <strong className="tm-num">{row.rank}</strong> },
     { key: 'config', header: '配置', cell: row => {
       const config = configs.get(row.name)
       const isCurrent = !!current && !!config && sameConfig(current.retrieval_config, config)
@@ -201,7 +200,7 @@ export function TuningDetail() {
       const goal = key === data.objective
       const top = bestOf(key)
       return {
-        key, header: objectiveLabel(key), align: 'right', nowrap: true, className: goal ? 'ev-goal' : undefined, headerClassName: goal ? 'ev-goal' : undefined,
+        key, header: objectiveLabel(key), nowrap: true, className: goal ? 'ev-goal' : undefined, headerClassName: goal ? 'ev-goal' : undefined,
         cell: row => {
           const value = row[key as keyof LeaderboardRow] as number | null
           if (value == null) return <span className="tm-faint">—</span>
@@ -209,8 +208,8 @@ export function TuningDetail() {
         },
       }
     }),
-    { key: 'p50', header: 'P50 耗时', align: 'right', nowrap: true, cell: row => <span className="tm-faint tm-num">{row.latency_p50_ms == null ? '—' : `${row.latency_p50_ms.toFixed(1)} ms`}</span> },
-    { key: 'failed', header: '失败', align: 'right', cell: row => <span className={row.failed ? 'ev-fail tm-num' : 'tm-faint tm-num'}>{row.failed}</span> },
+    { key: 'p50', header: 'P50 耗时', nowrap: true, cell: row => <span className="tm-faint tm-num">{row.latency_p50_ms == null ? '—' : `${row.latency_p50_ms.toFixed(1)} ms`}</span> },
+    { key: 'failed', header: '失败', cell: row => <span className={row.failed ? 'ev-fail tm-num' : 'tm-faint tm-num'}>{row.failed}</span> },
     { key: 'more', header: <span className="sr-only">更多操作</span>, width: 44, cell: row => {
       const config = configs.get(row.name)
       const isCurrent = !!current && !!config && sameConfig(current.retrieval_config, config)
@@ -226,7 +225,7 @@ export function TuningDetail() {
     <Button variant="secondary" busy={exported.isPending} onClick={() => exported.mutate(undefined)}>导出 JSON</Button>
     <Button variant="secondary" busy={rerun.isPending} disabled={!data.question_count} onClick={() => rerun.mutate(data)}>用相同设置再跑一次</Button>
   </>
-  return <Page side={<EvaluationSide section="tuning" />} title={data?.name ?? '检索调优'} crumbs={[{ to: '/evaluation/tuning', label: '检索调优' }]} meta={data && <StatusTag value={data.status} />} actions={actions}>
+  return <Page title={data?.name ?? '检索调优'} crumbs={[{ to: '/evaluation/tuning', label: '检索调优' }]} meta={data && <StatusTag value={data.status} />} actions={actions}>
     {run.isPending ? <Loading /> : run.isError ? <ErrorState error={run.error} retry={() => { void run.refetch() }} /> : data && <>
       <FactStrip items={[
         { label: '知识库', value: kb.data?.name ?? '—' },

@@ -6,8 +6,8 @@ import { api, post, useAction, useApi } from '../lib/api'
 import type { ServiceCheck, Settings } from '../lib/types'
 import { secretPatch, type RerankProtocol, type ServiceSettingsPatch } from '../lib/configuration'
 import { FormField, SecretField, TestConnection } from '../components/ConfigurationControls'
-import { SettingsSide } from '../components/shell/ModuleNav'
 import { Page } from '../components/shell/Shell'
+import { useUnsavedChanges } from '../components/shell/unsaved'
 import { Button, DataTable, Empty, ErrorState, Loading, Notice, Segmented, StatusTag, Tag, buttonClass } from '../components/ui'
 import { SettingsModels } from './SettingsModels'
 
@@ -35,11 +35,11 @@ function ServiceGroup({ services }: { services: Service[] }) {
 }
 
 export function ServiceSettingsPage() {
-  return <Page side={<SettingsSide />} title="Embedding 与重排"><ServiceGroup services={['embedding', 'rerank']} /></Page>
+  return <Page title="Embedding 与重排"><ServiceGroup services={['embedding', 'rerank']} /></Page>
 }
 
 export function StorageSettingsPage() {
-  return <Page side={<SettingsSide />} title="文档解析与向量库">
+  return <Page title="文档解析与向量库">
     <ServiceGroup services={['mineru', 'milvus']} />
     <section className="tm-panel st-service" aria-label="PostgreSQL 配置">
       <div className="tm-panel-title"><h2>PostgreSQL</h2></div>
@@ -59,13 +59,13 @@ const CHECK_COLUMNS = [
 
 export function HealthPage() {
   const check = useAction(() => post<{ checks: ServiceCheck[] }>('/settings/check'), { success: '环境检查已完成' })
-  return <Page side={<SettingsSide />} title="环境检查" actions={<>
+  return <Page title="环境检查" actions={<>
     <a className={buttonClass('secondary')} href="/api/health" target="_blank" rel="noopener noreferrer">健康检查 JSON<ExternalLink size={13} /></a>
     <Button busy={check.isPending} onClick={() => check.mutate()}><RefreshCw size={14} />环境检查（不计费）</Button>
   </>}>
     {check.error && <ErrorState error={check.error} />}
     {check.data
-      ? <section className="tm-panel ad-panel" aria-label="环境检查结果"><DataTable columns={CHECK_COLUMNS} rows={check.data.checks} rowKey={item => item.name} label="环境检查结果" /></section>
+      ? <section className="tm-panel adm-panel" aria-label="环境检查结果"><DataTable columns={CHECK_COLUMNS} rows={check.data.checks} rowKey={item => item.name} label="环境检查结果" /></section>
       : !check.error && <section className="tm-panel"><Empty title="尚未运行环境检查" /></section>}
   </Page>
 }
@@ -106,8 +106,12 @@ function ServiceEditor({ service, name, settings }: { service: Service; name: st
       client.setQueryData(['/settings'], result)
     },
   })
+  useUnsavedChanges(dirty, () => save.mutateAsync(patchFor()).then(() => true, () => false))
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    save.mutate(patchFor())
+  }
+  function patchFor(): ServiceSettingsPatch {
     const credentials = secretPatch(key, clearKey)
     const base_url = form.base_url.trim()
     const model = form.model.trim()
@@ -115,7 +119,7 @@ function ServiceEditor({ service, name, settings }: { service: Service; name: st
       : service === 'rerank' ? { rerank: { base_url, model, protocol: form.protocol, ...credentials } }
         : service === 'mineru' ? { mineru: { base_url } }
           : { milvus: { uri: form.uri.trim(), collection: form.collection.trim() } }
-    save.mutate(patch)
+    return patch
   }
   return <section className="tm-panel st-service">
     <div className="tm-panel-title">

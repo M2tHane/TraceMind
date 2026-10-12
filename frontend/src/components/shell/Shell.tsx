@@ -1,95 +1,107 @@
 import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import clsx from 'clsx'
+import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { MODULES, moduleFor, tabFor, type Module, type ModuleTab } from '../../lib/nav'
+import { THEME_LABELS, useTheme } from '../../lib/theme'
 import { BrandMark } from '../ui'
-
-interface RailItem { path: string; match: string; label: string; icon: string; admin?: boolean }
-// Icon paths follow the prototype rail.
-const RAIL: RailItem[] = [
-  { path: '/chat', match: '/chat', label: '问答', icon: 'M4 5h16v11H9l-5 4z' },
-  { path: '/knowledge', match: '/knowledge', label: '知识库', icon: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z' },
-  { path: '/memory', match: '/memory', label: '记忆', icon: 'M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.7.9.8 1.6 1.8 1.6 3V19h4v-2.3c0-1.2.7-2.2 1.6-3C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6zM10 22h4' },
-  { path: '/evaluation', match: '/evaluation', label: '评测', icon: 'M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3', admin: true },
-  { path: '/admin/reviews', match: '/admin', label: '管理', icon: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z', admin: true },
-  { path: '/settings', match: '/settings', label: '设置', icon: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6', admin: true },
-]
+import { guardNavigation } from './unsaved'
 
 export function useReviewCount(enabled = true): number {
   const count = useApi<{ total: number }>('/admin/reviews/count', { enabled, poll: 30000 })
   return count.data?.total ?? 0
 }
 
-/** Primary navigation: icon over label, the account avatar at the bottom. */
-export function Rail() {
-  const { user } = useAuth()
-  const admin = user?.role === 'admin'
+function NavItem({ module, active }: { module: Module; active: boolean }) {
+  const Icon = module.icon
+  return <Link to={module.to} className="tm-nav" aria-current={active ? 'page' : undefined} title={module.label} onClick={guardNavigation}>
+    <Icon size={16} strokeWidth={1.7} aria-hidden="true" /><span>{module.label}</span>
+  </Link>
+}
+
+/**
+ * Workspace sidebar (216px): brand, the work itself at the top (grouped), governance and system pages flat at the
+ * bottom, then the account row with the theme switch and sign-out. Nav items never carry numbers.
+ */
+export function Sidebar() {
+  const { user, signOut } = useAuth()
   const { pathname } = useLocation()
-  const pending = useReviewCount(admin)
+  const { choice, next } = useTheme()
+  const admin = user?.role === 'admin'
+  const current = moduleFor(pathname)
+  const visible = MODULES.filter(module => admin || !module.admin)
+  const top = visible.filter(module => module.placement === 'top')
+  const bottom = visible.filter(module => module.placement === 'bottom')
+  const groups = [...new Set(top.map(module => module.group ?? ''))]
   const name = user?.display_name || user?.username || '?'
-  return <header className="tm-rail">
-    <Link to="/chat" className="tm-rail-logo" aria-label="TraceMind 首页"><BrandMark size={36} /></Link>
-    <nav aria-label="主要导航">
-      {RAIL.filter(item => admin || !item.admin).map(item => {
-        const active = pathname === item.match || pathname.startsWith(`${item.match}/`)
-        const badge = item.match === '/admin' && pending > 0
-        return <Link key={item.path} to={item.path} className="tm-rail-item" aria-current={active ? 'page' : undefined} aria-label={badge ? `${item.label}，${pending} 项待审批` : item.label}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={item.icon} /></svg>
-          <span aria-hidden="true">{item.label}</span>
-          {badge && <span className="tm-rail-badge" aria-hidden="true">{pending > 99 ? '99+' : pending}</span>}
-        </Link>
-      })}
+  const ThemeIcon = choice === 'dark' ? Moon : choice === 'light' ? Sun : Monitor
+  const themeLabel = `主题：${THEME_LABELS[choice]}，点按切换`
+  return <aside className="tm-side">
+    <div className="tm-side-head"><Link to="/chat" className="tm-brand" aria-label="TraceMind 首页" onClick={guardNavigation}><BrandMark size={22} /><span>TraceMind</span></Link></div>
+    <nav aria-label="主要导航" className="tm-side-nav">
+      {groups.map(group => <div key={group} className="tm-nav-group">
+        {group && <div className="tm-nav-label">{group}</div>}
+        {top.filter(module => (module.group ?? '') === group).map(module => <NavItem key={module.key} module={module} active={current?.key === module.key} />)}
+      </div>)}
+      {bottom.length > 0 && <div className="tm-side-bottom">
+        {bottom.map(module => <NavItem key={module.key} module={module} active={current?.key === module.key} />)}
+      </div>}
     </nav>
-    <NavLink to="/account" className="tm-rail-me" title={`${name} · 我的账户`} aria-label="我的账户">{name.slice(0, 1)}</NavLink>
-  </header>
+    <div className="tm-side-foot">
+      <Link to="/account/profile" className="tm-account" aria-current={current?.key === 'account' ? 'page' : undefined} title={`${name} · 我的账户`} aria-label="我的账户" onClick={guardNavigation}>
+        <span className="tm-avatar" aria-hidden="true">{name.slice(0, 1)}</span>
+        <span className="tm-user"><b>{name}</b><span>{user?.role === 'admin' ? '管理员' : '员工'}</span></span>
+      </Link>
+      <button type="button" className="tm-icon-btn" aria-label={themeLabel} title={themeLabel} onClick={next}><ThemeIcon size={16} strokeWidth={1.7} aria-hidden="true" /></button>
+      <button type="button" className="tm-icon-btn" aria-label="退出登录" title="退出登录" onClick={event => { if (guardNavigation(event)) void signOut() }}><LogOut size={16} strokeWidth={1.7} aria-hidden="true" /></button>
+    </div>
+  </aside>
 }
 
-export interface SideEntry { to: string; label: ReactNode; count?: ReactNode; badge?: number; sub?: ReactNode; end?: boolean; title?: string; current?: boolean }
+function TabCount({ tab }: { tab: ModuleTab }) {
+  const pending = useReviewCount(tab.count === 'reviews-pending')
+  const decided = useApi<{ total: number }>('/admin/reviews/history?limit=1', { enabled: tab.count === 'reviews-decided' })
+  if (tab.count === 'reviews-pending') return pending > 0 ? <span className="tm-tab-badge">{pending > 99 ? '99+' : pending}</span> : null
+  if (tab.count === 'reviews-decided' && decided.data) return <span className="tm-tab-count">{decided.data.total}</span>
+  return null
+}
 
-/** Module sidebar: an optional heading, then links and grey group labels. */
-export function SideNav({ title, label, header, groups, footer }: {
-  title?: string; label: string; header?: ReactNode; footer?: ReactNode
-  groups: { label?: string; items: SideEntry[] }[]
-}) {
-  return <nav className="tm-side" aria-label={label}>
-    {header}
-    {title && <h2>{title}</h2>}
-    {groups.filter(group => group.items.length).map((group, index) => <Fragment key={group.label ?? index}>
-      {group.label && <div className="tm-side-group">{group.label}</div>}
-      {group.items.map(item => <SideLink key={item.to} {...item} />)}
-    </Fragment>)}
-    {footer && <><span className="tm-side-spacer" />{footer}</>}
+/** A module's sub-pages as underline tabs, directly under the page header. */
+function ModuleTabs({ module, current }: { module: Module; current: ModuleTab }) {
+  const admin = useAuth().user?.role === 'admin'
+  const tabs = (module.tabs ?? []).filter(tab => admin || !tab.admin)
+  if (tabs.length < 2) return null
+  return <nav className="tm-subnav tm-tabs" aria-label={`${module.label}导航`}>
+    {tabs.map(tab => <NavLink key={tab.to} to={tab.to} end className="tm-tab" aria-current={tab === current ? 'page' : undefined} onClick={guardNavigation}>
+      {tab.label}{tab.count && <TabCount tab={tab} />}
+    </NavLink>)}
   </nav>
-}
-
-export function SideLink({ to, label, count, badge, sub, end, title, current }: SideEntry) {
-  const body = sub !== undefined ? <><span className="tm-si-label">{label}</span><span className="tm-si-sub">{sub}</span></>
-    : <><span className="tm-si-label">{label}</span>
-      {badge ? <span className="tm-si-badge">{badge}</span> : count !== undefined && <span className="tm-si-count">{count}</span>}</>
-  const className = clsx('tm-si', sub !== undefined && 'tm-si-two')
-  // Links that differ only by query string say whether they are current; the rest follow the route.
-  if (current !== undefined) return <Link to={to} title={title} className={className} aria-current={current ? 'page' : undefined}>{body}</Link>
-  return <NavLink to={to} end={end} title={title} className={className}>{body}</NavLink>
 }
 
 export interface Crumb { to: string; label: string }
 
-/** Top bar + body for one page; `side` is the module sidebar. The main column hosts drawers. */
-export function Page({ side, title, crumbs, meta, actions, children, bodyClassName, bare = false }: {
-  side?: ReactNode; title: ReactNode; crumbs?: Crumb[]; meta?: ReactNode; actions?: ReactNode; children: ReactNode; bodyClassName?: string; bare?: boolean
+/**
+ * Page header (56px: module icon, breadcrumbs, title, actions) + module tabs + body.
+ * The main column hosts drawers.
+ */
+export function Page({ title, crumbs, meta, actions, children, bodyClassName, bare = false }: {
+  title: ReactNode; crumbs?: Crumb[]; meta?: ReactNode; actions?: ReactNode; children: ReactNode; bodyClassName?: string; bare?: boolean
 }) {
-  return <>
-    {side}
-    <main id="main-content" className="tm-main" data-drawer-host>
-      <header className="tm-top">
-        {crumbs?.map(crumb => <Fragment key={crumb.to}><Link className="tm-top-crumb" to={crumb.to}>{crumb.label}</Link><span className="tm-top-sep" aria-hidden="true">/</span></Fragment>)}
-        <h1>{title}</h1>
-        {meta}
-        {actions && <div className="tm-top-actions">{actions}</div>}
-      </header>
-      {bare ? children : <div className={clsx('tm-body', bodyClassName)}>{children}</div>}
-    </main>
-  </>
+  const { pathname } = useLocation()
+  const module = moduleFor(pathname)
+  const tab = tabFor(module, pathname)
+  const Icon = module?.icon
+  return <main id="main-content" className="tm-main" data-drawer-host>
+    <header className="tm-top">
+      {Icon && <Icon className="tm-top-icon" size={20} strokeWidth={1.7} aria-hidden="true" />}
+      {crumbs?.map(crumb => <Fragment key={crumb.to}><Link className="tm-top-crumb" to={crumb.to} onClick={guardNavigation}>{crumb.label}</Link><span className="tm-top-sep" aria-hidden="true">/</span></Fragment>)}
+      <h1>{title}</h1>
+      {meta}
+      {actions && <div className="tm-top-actions">{actions}</div>}
+    </header>
+    {module && tab && <ModuleTabs module={module} current={tab} />}
+    {bare ? children : <div className={['tm-body', bodyClassName].filter(Boolean).join(' ')}>{children}</div>}
+  </main>
 }
