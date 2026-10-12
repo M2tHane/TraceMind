@@ -168,3 +168,6 @@
 /* The chat page is one white surface: list, conversation and evidence pane differ only by hairlines. */
 body:has(.chat-layout), .tm-app:has(.chat-layout) { background: var(--tm-surface); }
 .tm-chat-list, .tm-chat-list-collapsed, .evidence-pane, .evidence-pane-collapsed { background: var(--tm-surface); }
+.tm-chat-list, .tm-chat-list-collapsed, .evidence-pane, .evidence-pane-collapsed { border-left: 0; border-right: 0; }
+main.chat-layout .chat-header { border-bottom: 0; }
+.tm-chat-list .tm-panel-header, .evidence-pane .tm-panel-header, .tm-chat-list-collapsed .tm-panel-header, .evidence-pane-collapsed .tm-panel-header { border-bottom: 0; }
