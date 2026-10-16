@@ -349,6 +349,8 @@ async def retry_document(document_id: ResourceID, db: Annotated[AsyncSession, De
         document.status, document.stage, document.error = "queued", "queued", None
         enqueue(db, "parse", document.id)
         await db.flush()
+        # updated_at is set by the database on flush; reload it instead of lazy-loading in serialize.
+        await db.refresh(document)
         return serialize(document, exclude={"markdown"})
     except HTTPException:
         raise

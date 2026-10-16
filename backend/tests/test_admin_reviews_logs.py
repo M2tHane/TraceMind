@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app import models
 from app.config import settings
@@ -171,3 +171,30 @@ async def test_query_log_multi_library_filter_and_today_counts(tenant) -> None:
         wide = (await http.get("/api/admin/query-logs",
                                params={"today_since": (now - timedelta(days=4)).isoformat()})).json()
         assert wide["today"] == {"count": 5, "failed": 1}
+
+
+async def test_retry_requeues_a_failed_document_and_returns_it(tenant, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    async with Session() as db, db.begin():
+        db.add(library(tenant, "员工手册", kb_id=KB_HANDBOOK))
+        failed = document(tenant, KB_HANDBOOK, "leave.md", status="failed", stage="failed", error="embedding failed",
+                          review_status="approved", uploaded_by=ROOT)
+        db.add(failed)
+    folder = tmp_path / "documents" / str(failed.id)
+    folder.mkdir(parents=True)
+    (folder / "source.md").write_text("# 休假制度", encoding="utf-8")
+    try:
+        async with client() as http:
+            await sign_in(http, "root")
+            response = await http.post(f"/api/documents/{failed.id}/retry")
+        assert response.status_code == 202, response.text
+        assert (response.json()["status"], response.json()["error"]) == ("queued", None)
+        assert response.json()["updated_at"]
+        async with Session() as db:
+            row = await db.get(models.Document, failed.id)
+            jobs = (await db.scalars(select(models.Job).where(models.Job.tenant_id == tenant,
+                                                              models.Job.resource_id == failed.id))).all()
+        assert row.status == "queued" and [job.job_type for job in jobs] == ["parse"]
+    finally:
+        async with Session() as db, db.begin():
+            await db.execute(delete(models.Job).where(models.Job.tenant_id == tenant))
