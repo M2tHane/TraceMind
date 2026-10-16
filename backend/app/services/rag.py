@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from time import perf_counter
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, tuple_
 
 from app.api.common import chunk_json, owned
 from app.config import Settings, settings
@@ -42,22 +42,52 @@ def resolve_retrieval(method: str, top_k: int, candidate_k: int,
     return RetrievalConfig.from_method(method, top_k, candidate_k)
 
 
-async def load_ready_chunks(knowledge_base_id: int, runtime_settings: Settings) -> list[dict[str, Any]]:
-    """Validate the index identity and load every chunk of ready documents in one knowledge base."""
+class KnowledgeBaseChunks:
+    """Ready chunks of one knowledge base, read from PostgreSQL by ID (never the whole library)."""
+
+    def __init__(self, knowledge_base_id: int) -> None:
+        self.knowledge_base_id = knowledge_base_id
+
+    def _ready(self, *columns: Any, document_ids: list[str] | None = None) -> Any:
+        statement = select(*columns).join(Document, Chunk.document_id == Document.id).where(
+            Chunk.tenant_id == settings.tenant_id, Document.tenant_id == settings.tenant_id,
+            Chunk.knowledge_base_id == self.knowledge_base_id,
+            Document.knowledge_base_id == self.knowledge_base_id, Document.status == "ready",
+        )
+        if document_ids is not None:
+            statement = statement.where(Document.id.in_([int(d) for d in document_ids]))
+        return statement
+
+    async def count(self, document_ids: list[str] | None = None) -> int:
+        async with Session() as db:
+            return int(await db.scalar(self._ready(func.count(Chunk.id), document_ids=document_ids)) or 0)
+
+    async def fetch(self, ids: list[str], document_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        wanted = {int(i) for i in ids if i.isascii() and i.isdecimal()}
+        if not wanted:
+            return {}
+        async with Session() as db:
+            rows = (await db.execute(self._ready(Chunk, Document.filename, document_ids=document_ids)
+                                     .where(Chunk.id.in_(wanted)))).all()
+        return {str(chunk.id): chunk_json(chunk, filename) for chunk, filename in rows}
+
+    async def neighbors(self, positions: set[tuple[str, int]]) -> dict[tuple[str, int], dict[str, Any]]:
+        if not positions:
+            return {}
+        keys = [(int(document), index) for document, index in positions]
+        async with Session() as db:
+            rows = (await db.execute(self._ready(Chunk, Document.filename)
+                                     .where(tuple_(Chunk.document_id, Chunk.chunk_index).in_(keys)))).all()
+        return {(str(chunk.document_id), chunk.chunk_index): chunk_json(chunk, filename) for chunk, filename in rows}
+
+
+async def open_chunks(knowledge_base_id: int, runtime_settings: Settings) -> KnowledgeBaseChunks:
+    """Validate the index identity and that the knowledge base has ready chunks to search."""
     async with Session() as db:
         kb = await owned(db, KnowledgeBase, knowledge_base_id)
         validate_index_config(kb, runtime_settings)
-        rows = (await db.execute(select(Chunk, Document.filename).join(
-            Document, Chunk.document_id == Document.id
-        ).where(
-            Chunk.tenant_id == settings.tenant_id, Document.tenant_id == settings.tenant_id,
-            Chunk.knowledge_base_id == kb.id, Document.knowledge_base_id == kb.id,
-            Document.status == "ready",
-        ).order_by(Chunk.id).limit(runtime_settings.max_kb_chunks + 1))).all()
-    if len(rows) > runtime_settings.max_kb_chunks:
-        raise ProviderError("知识库超过本地 BM25 工作台容量上限，请拆分知识库")
-    chunks = [chunk_json(chunk, filename) for chunk, filename in rows]
-    if not chunks:
+    chunks = KnowledgeBaseChunks(kb.id)
+    if not await chunks.count():
         raise ProviderError("知识库还没有可检索文档，请等待解析与索引完成")
     return chunks
 
@@ -82,7 +112,7 @@ async def answer_question(
                 await owned(db, KnowledgeBase, knowledge_base_id)
             recall = {"contexts": [], "supplied": [], "trace": [], "queries": [question], "embedding_tokens": 0}
         else:
-            chunks = await load_ready_chunks(knowledge_base_id, runtime_settings)
+            chunks = await open_chunks(knowledge_base_id, runtime_settings)
             recall = await Recall(providers, vectors, cache=cache, before_model_call=before_model_call,
                                   progress=progress).run(question, chunks, config, knowledge_base_id)
         retrieval_ms = (perf_counter() - started) * 1000
@@ -126,7 +156,7 @@ async def search(knowledge_base_id: int, query: str, config: RetrievalConfig,
     providers, vectors = Providers(runtime_settings), VectorStore(runtime_settings)
     started = perf_counter()
     try:
-        chunks = await load_ready_chunks(knowledge_base_id, runtime_settings)
+        chunks = await open_chunks(knowledge_base_id, runtime_settings)
         recall = await Recall(providers, vectors).run(query, chunks, config, knowledge_base_id)
         return {**recall, "retrieval_ms": round((perf_counter() - started) * 1000, 2),
                 "retrieval_config": config.model_dump()}

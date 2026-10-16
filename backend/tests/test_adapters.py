@@ -495,7 +495,7 @@ def test_retrieval_anchor_identity_deduplication_and_cutoffs() -> None:
 
 
 def _mock_vectors(
-    monkeypatch: pytest.MonkeyPatch, *, exists: bool = False, dimensions: int = 3,
+    monkeypatch: pytest.MonkeyPatch, *, exists: bool = False, dimensions: int = 3, full_text: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
     from app.services import vectors
 
@@ -509,6 +509,9 @@ def _mock_vectors(
     class FakeSchema:
         def add_field(self, **kwargs: Any) -> None:
             record("add_field", kwargs)
+
+        def add_function(self, function: Any) -> None:
+            record("add_function", {"function": function})
 
     class FakeIndexes:
         def add_index(self, **kwargs: Any) -> None:
@@ -540,6 +543,8 @@ def _mock_vectors(
                 *[{"name": name, "type": vectors.DataType.VARCHAR}
                   for name in ("tenant_id", "knowledge_base_id", "document_id")],
                 {"name": "vector", "type": vectors.DataType.FLOAT_VECTOR, "params": {"dim": dimensions}},
+                *([{"name": "text", "type": vectors.DataType.VARCHAR},
+                   {"name": "sparse", "type": vectors.DataType.SPARSE_FLOAT_VECTOR}] if full_text else []),
             ]}
 
         def load_collection(self, **kwargs: Any) -> None:
@@ -569,6 +574,8 @@ def _mock_vectors(
 
 
 async def test_milvus_ensure_schema_create_once_and_all_calls_off_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.vectors import TEXT_ANALYZER
+
     store, state = _mock_vectors(monkeypatch)
     try:
         await asyncio.gather(store.ensure(), store.ensure(), store.ensure())
@@ -580,9 +587,26 @@ async def test_milvus_ensure_schema_create_once_and_all_calls_off_loop(monkeypat
         assert creation["consistency_level"] == "Strong"
         schema = next(kwargs for name, kwargs in state["calls"] if name == "create_schema")
         assert schema == {"auto_id": False, "enable_dynamic_field": False}
+        text = next(kwargs for name, kwargs in state["calls"] if name == "add_field" and kwargs["field_name"] == "text")
+        assert text["enable_analyzer"] and text["analyzer_params"] == TEXT_ANALYZER
+        function = next(kwargs["function"] for name, kwargs in state["calls"] if name == "add_function")
+        assert function.to_dict()["input_field_names"] == ["text"]
+        assert function.to_dict()["output_field_names"] == ["sparse"]
+        indexes = {kwargs["field_name"]: kwargs["metric_type"] for name, kwargs in state["calls"] if name == "add_index"}
+        assert indexes == {"vector": "COSINE", "sparse": "BM25"}
     finally:
         await store.close()
     assert state["calls"][-1][0] == "close"
+
+
+async def test_milvus_existing_collection_without_bm25_fields_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, state = _mock_vectors(monkeypatch, exists=True, full_text=False)
+    try:
+        with pytest.raises(ProviderError, match="BM25"):
+            await store.ensure()
+        assert "create_collection" not in [name for name, _ in state["calls"]]
+    finally:
+        await store.close()
 
 
 async def test_milvus_existing_collection_dimension_mismatch_is_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -602,7 +626,7 @@ async def test_milvus_upsert_idempotent_string_scopes_and_strong_search(monkeypa
         await store.upsert(chunks, [[1, 2, 3]], knowledge_base_id=789, document_id=456)
         await store.upsert(chunks, [[3, 2, 1]], knowledge_base_id=789, document_id=456)
         assert len(state["stored"]) == 1
-        assert state["stored"]["c1"] == {"id": "c1", "vector": [3.0, 2.0, 1.0],
+        assert state["stored"]["c1"] == {"id": "c1", "vector": [3.0, 2.0, 1.0], "text": _chunk()["text"],
                                              "tenant_id": "123", "knowledge_base_id": "789", "document_id": "456"}
         result = await store.search([1, 2, 3], knowledge_base_id=789, limit=5)
         assert result == [{"id": "c1", "score": 0.9}]
@@ -611,6 +635,36 @@ async def test_milvus_upsert_idempotent_string_scopes_and_strong_search(monkeypa
         assert search["consistency_level"] == "Strong"
         assert search["limit"] == 5
         assert search["anns_field"] == "vector"
+    finally:
+        await store.close()
+
+
+async def test_milvus_bm25_search_uses_text_query_sparse_field_and_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, state = _mock_vectors(monkeypatch)
+    try:
+        assert await store.bm25_search("  ", knowledge_base_id=789) == []
+        assert await store.bm25_search("lora", knowledge_base_id=789, document_ids=[]) == []
+        assert "search" not in [name for name, _ in state["calls"]]
+        result = await store.bm25_search("LoRA 低秩", knowledge_base_id=789, limit=7, document_ids=["456"])
+        assert result == [{"id": "c1", "score": 0.9}]
+        search = next(kwargs for name, kwargs in state["calls"] if name == "search")
+        assert search["data"] == ["LoRA 低秩"] and search["anns_field"] == "sparse"
+        assert search["search_params"]["metric_type"] == "BM25" and search["limit"] == 7
+        assert search["filter"] == 'tenant_id == "123" and knowledge_base_id == "789" and document_id in ["456"]'
+        with pytest.raises(ProviderError, match="identifiers"):
+            await store.bm25_search("lora", knowledge_base_id='1" or true')
+    finally:
+        await store.close()
+
+
+async def test_milvus_upsert_rejects_missing_or_oversized_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, state = _mock_vectors(monkeypatch)
+    try:
+        for text in (None, "字" * 30000):
+            with pytest.raises(ProviderError, match="text"):
+                await store.upsert([{**_chunk(), "document_id": "456", "text": text}], [[1, 2, 3]],
+                                   knowledge_base_id=789, document_id=456)
+        assert state["calls"] == []
     finally:
         await store.close()
 

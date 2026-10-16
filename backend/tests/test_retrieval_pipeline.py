@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.models import TuningRun
 from app.services.metrics import ranking_metrics
-from app.services.ranking import rrf
+from app.services.ranking import bm25, rrf
 from app.services.retrieval import (
     Recall,
     RetrievalCache,
@@ -15,6 +15,7 @@ from app.services.retrieval import (
     attach_neighbors,
     dedupe,
     mmr,
+    neighbor_positions,
 )
 from app.services.tuning import TuningError, expand_grid, preset_candidates, summarize, validate_candidates
 
@@ -54,18 +55,46 @@ class FakeProviders:
 
 
 class FakeVectors:
+    """Dense hits in a fixed order (unfiltered, like a stale index); BM25 scored over the scoped corpus."""
+
     def __init__(self, order: list[str]) -> None:
-        self.order, self.calls = order, []
+        self.order, self.calls, self.bm25_calls = order, [], []
 
     async def search(self, vector, knowledge_base_id, limit, document_ids=None):
         self.calls.append({"limit": limit, "document_ids": document_ids})
         return [{"id": i, "score": 1.0 - n / 10} for n, i in enumerate(self.order[:limit])]
 
+    async def bm25_search(self, query, knowledge_base_id, limit, document_ids=None):
+        self.bm25_calls.append({"query": query, "limit": limit, "document_ids": document_ids})
+        corpus = [c for c in CHUNKS if document_ids is None or c["document_id"] in document_ids]
+        return [{"id": row["id"], "score": row["score"]} for row in bm25(query, corpus, limit)]
 
-async def run(config: RetrievalConfig, providers=None, vectors=None, cache=None, question="agents tool calls"):
+
+class FakeChunks:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows, self.fetched, self.neighbor_requests = rows, [], []
+
+    def _scoped(self, document_ids):
+        return [c for c in self.rows if document_ids is None or c["document_id"] in document_ids]
+
+    async def count(self, document_ids=None) -> int:
+        return len(self._scoped(document_ids))
+
+    async def fetch(self, ids, document_ids=None):
+        self.fetched.append(list(ids))
+        return {c["id"]: c for c in self._scoped(document_ids) if c["id"] in ids}
+
+    async def neighbors(self, positions):
+        self.neighbor_requests.append(set(positions))
+        return {(c["document_id"], c["chunk_index"]): c for c in self.rows
+                if (c["document_id"], c["chunk_index"]) in positions}
+
+
+async def run(config: RetrievalConfig, providers=None, vectors=None, cache=None, question="agents tool calls",
+              chunks=None):
     providers = providers or FakeProviders()
     vectors = vectors or FakeVectors(["d", "a", "c", "b"])
-    result = await Recall(providers, vectors, cache=cache).run(question, CHUNKS, config, 7)
+    result = await Recall(providers, vectors, cache=cache).run(question, chunks or FakeChunks(CHUNKS), config, 7)
     return result, providers, vectors
 
 
@@ -131,7 +160,27 @@ async def test_document_filter_scopes_both_routes() -> None:
     result, _, vectors = await run(config)
     assert {r["document_id"] for r in result["contexts"]} == {"2"}
     assert vectors.calls[0]["document_ids"] == ["2"]
+    assert vectors.bm25_calls[0]["document_ids"] == ["2"]
     assert result["trace"][0]["corpus_chunks"] == 2
+
+
+async def test_chunks_are_read_by_id_and_neighbors_only_when_requested() -> None:
+    chunks = FakeChunks(CHUNKS)
+    result, _, vectors = await run(RetrievalConfig(rerank=False, top_k=1, route_k=2), chunks=chunks)
+    assert vectors.bm25_calls[0]["query"] == "agents tool calls"
+    assert all(len(ids) <= 2 for ids in chunks.fetched) and chunks.neighbor_requests == []
+    chunks = FakeChunks(CHUNKS)
+    result, _, _ = await run(RetrievalConfig(rerank=False, top_k=1, neighbor_window=1), chunks=chunks)
+    assert result["supplied"][0]["id"] == "c"
+    assert chunks.neighbor_requests == [{("2", 1)}]
+    assert result["supplied"][0]["context_after"] == CHUNKS[3]["text"]
+
+
+async def test_hits_without_a_ready_chunk_row_are_dropped() -> None:
+    # "d" is still in Milvus (e.g. a document being replaced) but no longer has a ready row.
+    chunks = FakeChunks([c for c in CHUNKS if c["id"] != "d"])
+    result, _, _ = await run(RetrievalConfig(routes=["vector"], rerank=False, top_k=3), chunks=chunks)
+    assert [r["id"] for r in result["contexts"]] == ["a", "c", "b"]
 
 
 def test_postprocessing_helpers() -> None:
@@ -139,7 +188,10 @@ def test_postprocessing_helpers() -> None:
     assert [r["id"] for r in dedupe(rows, 0.9)] == ["x", "z"]
     assert [r["id"] for r in dedupe(rows, 1.0)] == ["x", "y", "z"]
     assert [r["id"] for r in mmr(rows, 2, 0.3)] == ["x", "z"]
-    expanded = attach_neighbors([CHUNKS[1]], CHUNKS, 1)[0]
+    assert neighbor_positions([CHUNKS[1]], 1) == {("1", 0), ("1", 2)}
+    assert neighbor_positions([CHUNKS[0], CHUNKS[1]], 1) == {("1", 2)}
+    by_position = {(c["document_id"], c["chunk_index"]): c for c in CHUNKS}
+    expanded = attach_neighbors([CHUNKS[1]], by_position, 1)[0]
     assert expanded["context_before"] == CHUNKS[0]["text"] and expanded["context_after"] == ""
     assert expanded["text"] == CHUNKS[1]["text"]
 

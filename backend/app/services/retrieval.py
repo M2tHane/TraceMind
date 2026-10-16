@@ -11,18 +11,20 @@ visible in debug results, stored chat messages, evaluation payloads and MCP.
 
 Scores are only comparable within one stage. ``min_score`` therefore applies only
 to reranker scores, never to RRF or raw BM25 values.
+
+Both routes are searched in Milvus and return chunk IDs; chunk rows (and neighbors)
+are then read by ID from a ``ChunkSource``, so a query never loads the whole library.
 """
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.services.ranking import bm25, rrf, tokenize
+from app.services.ranking import rrf, tokenize
 
 Route = Literal["bm25", "vector"]
 LEGACY_METHODS = ("bm25", "vector", "hybrid", "hybrid_rerank")
@@ -77,6 +79,16 @@ class RetrievalConfig(BaseModel):
 
     def needs_embedding(self) -> bool:
         return "vector" in self.routes
+
+
+class ChunkSource(Protocol):
+    """Ready chunks of one knowledge base, read on demand."""
+
+    async def count(self, document_ids: list[str] | None) -> int: ...
+
+    async def fetch(self, ids: list[str], document_ids: list[str] | None) -> dict[str, dict[str, Any]]: ...
+
+    async def neighbors(self, positions: set[tuple[str, int]]) -> dict[tuple[str, int], dict[str, Any]]: ...
 
 
 @dataclass
@@ -138,7 +150,15 @@ def mmr(rows: list[dict[str, Any]], k: int, lambda_: float) -> list[dict[str, An
     return [rows[index] for index in selected]
 
 
-def attach_neighbors(rows: list[dict[str, Any]], chunks: list[dict[str, Any]], window: int) -> list[dict[str, Any]]:
+def neighbor_positions(rows: list[dict[str, Any]], window: int) -> set[tuple[str, int]]:
+    """(document_id, chunk_index) of every chunk within ``window`` of a row, excluding the rows."""
+    own = {(row["document_id"], row["chunk_index"]) for row in rows if row.get("chunk_index") is not None}
+    return {(document, index + offset) for document, index in own
+            for offset in range(-window, window + 1) if offset and index + offset >= 0} - own
+
+
+def attach_neighbors(rows: list[dict[str, Any]], by_position: dict[tuple[str, int], dict[str, Any]],
+                     window: int) -> list[dict[str, Any]]:
     """Copy rows with adjacent same-document chunk text as context_before/context_after.
 
     The cited ``text`` is never altered, so evidence metrics still measure the
@@ -146,7 +166,6 @@ def attach_neighbors(rows: list[dict[str, Any]], chunks: list[dict[str, Any]], w
     """
     if window <= 0:
         return rows
-    by_position = {(c["document_id"], c.get("chunk_index")): c for c in chunks if c.get("chunk_index") is not None}
     expanded: list[dict[str, Any]] = []
     for row in rows:
         index = row.get("chunk_index")
@@ -203,7 +222,7 @@ class Recall:
         scored = [{**row, "score": self.cache.rerank_scores[(question, row["id"])]} for row in rows]
         return sorted(scored, key=lambda row: row["score"], reverse=True)
 
-    async def run(self, question: str, chunks: list[dict[str, Any]], config: RetrievalConfig,
+    async def run(self, question: str, chunks: ChunkSource, config: RetrievalConfig,
                   knowledge_base_id: int) -> dict[str, Any]:
         trace: list[dict[str, Any]] = []
 
@@ -214,10 +233,13 @@ class Recall:
             trace.append(entry)
 
         started = perf_counter()
-        if config.document_ids is not None:
-            allowed = set(config.document_ids)
-            chunks = [c for c in chunks if c["document_id"] in allowed]
-        record("scope", started, corpus_chunks=len(chunks), document_filter=config.document_ids)
+        corpus = await chunks.count(config.document_ids)
+        record("scope", started, corpus_chunks=corpus, document_filter=config.document_ids)
+
+        async def rows_for(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            # Hits of documents that are not ready (or outside the filter) have no row and drop out.
+            source = await chunks.fetch([h["id"] for h in hits], config.document_ids)
+            return [{**source[h["id"]], "score": h["score"]} for h in hits if h["id"] in source]
 
         queries = [question]
         if config.query_rewrite == "multi_query":
@@ -228,7 +250,6 @@ class Recall:
 
         lists: list[list[dict[str, Any]]] = []
         weights: list[float] = []
-        source = {c["id"]: c for c in chunks}
         # Vector first keeps the legacy hybrid tie-break order.
         for route in sorted(config.routes, key=lambda r: r != "vector"):
             started = perf_counter()
@@ -237,14 +258,16 @@ class Recall:
                 for query, vector in zip(queries, vectors, strict=True):
                     hits = await self.vectors.search(vector, knowledge_base_id, config.route_k,
                                                      document_ids=config.document_ids)
-                    ranking = [{**source[h["id"]], "score": h["score"]} for h in hits if h["id"] in source]
+                    ranking = await rows_for(hits)
                     lists.append(ranking)
                     weights.append(config.vector_weight)
                     record("recall.vector", started, ranking, query=query, k=config.route_k)
                     started = perf_counter()
             else:
                 for query in queries:
-                    ranking = await asyncio.to_thread(bm25, query, chunks, config.route_k)
+                    hits = await self.vectors.bm25_search(query, knowledge_base_id, config.route_k,
+                                                          document_ids=config.document_ids)
+                    ranking = await rows_for(hits)
                     lists.append(ranking)
                     weights.append(config.bm25_weight)
                     record("recall.bm25", started, ranking, query=query, k=config.route_k)
@@ -270,7 +293,10 @@ class Recall:
         ranked = dedupe(ranked, config.dedupe_threshold)
         if config.mmr_lambda is not None:
             ranked = mmr(ranked, len(ranked), config.mmr_lambda)
-        supplied = attach_neighbors(ranked[:config.top_k], chunks, config.neighbor_window)
+        top = ranked[:config.top_k]
+        nearby = (await chunks.neighbors(neighbor_positions(top, config.neighbor_window))
+                  if config.neighbor_window > 0 and top else {})
+        supplied = attach_neighbors(top, nearby, config.neighbor_window)
         record("postprocess", started, supplied, input=before, kept=len(ranked), min_score=config.min_score,
                dedupe_threshold=config.dedupe_threshold, mmr_lambda=config.mmr_lambda,
                neighbor_window=config.neighbor_window, top_k=config.top_k)

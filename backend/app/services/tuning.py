@@ -27,7 +27,7 @@ from app.models import KnowledgeBase, TuningRun
 from app.services.configuration import resolve_settings
 from app.services.metrics import RANKING_METRICS, ranking_metrics
 from app.services.providers import AccountUnavailable, ProviderError, Providers
-from app.services.rag import load_ready_chunks, validate_index_config
+from app.services.rag import open_chunks, validate_index_config
 from app.services.retrieval import Recall, RetrievalCache, RetrievalConfig
 from app.services.vectors import VectorStore
 
@@ -141,7 +141,7 @@ async def execute_tuning(run_id: int) -> None:
             validate_index_config(kb, runtime)
             if kb.version != frozen_version:
                 raise ProviderError("知识库在调优创建后发生变化，请重新创建调优任务")
-        chunks = await load_ready_chunks(kb_id, runtime)
+        chunks = await open_chunks(kb_id, runtime)
         for question in questions:
             if await _status(run_id) != "running":
                 logger.info("Tuning paused before question: run_id={}", run_id)

@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy import func, select
 
 from app.api.common import chunk_json, owned, scoped
-from app.config import settings
+from app.config import Settings, settings
 from app.db import Session, generate_id
 from app.models import Chunk, Document, KnowledgeBase
 from app.services.chunker import split_pages
@@ -22,6 +22,30 @@ from app.services.vectors import VectorStore
 
 def document_dir(document_id: int) -> Path:
     return settings.data_dir / "documents" / str(document_id)
+
+
+async def cached_embeddings(folder: Path, texts: list[str], runtime_settings: Settings,
+                            providers: Providers | None) -> list[list[float]]:
+    """Embed in batches of 16, reusing per-document cached batches; without providers, cache only."""
+    digest = hashlib.sha256(json.dumps({"model": runtime_settings.embedding_model, "url": runtime_settings.embedding_base_url,
+        "dimensions": runtime_settings.embedding_dimensions, "texts": texts}, ensure_ascii=False).encode()).hexdigest()
+    cache = folder / "embeddings"
+    cache.mkdir(exist_ok=True)
+    embeddings: list[list[float]] = []
+    for start in range(0, len(texts), 16):
+        batch_path = cache / f"{digest}-{start}.json"
+        if batch_path.exists():
+            batch = json.loads(batch_path.read_text(encoding="utf-8"))
+        elif providers is None:
+            raise ProviderError(f"Embedding cache missing: {batch_path}")
+        else:
+            values, usage = await providers.embed(texts[start:start + 16])
+            batch = {"vectors": values, "usage": usage}
+            temp = batch_path.with_suffix(".tmp")
+            temp.write_text(json.dumps(batch), encoding="utf-8")
+            temp.replace(batch_path)
+        embeddings.extend(batch["vectors"])
+    return embeddings
 
 
 async def set_stage(document_id: int, stage: str) -> None:
@@ -70,24 +94,9 @@ async def ingest_document(document_id: int) -> None:
         await db.commit()
         chunks = [chunk_json(c, filename) for c in existing]
     await set_stage(document_id, "embedding")
-    digest = hashlib.sha256(json.dumps({"model": runtime_settings.embedding_model, "url": runtime_settings.embedding_base_url,
-        "dimensions": runtime_settings.embedding_dimensions, "texts": [c["text"] for c in chunks]}, ensure_ascii=False).encode()).hexdigest()
-    cache = folder / "embeddings"
-    cache.mkdir(exist_ok=True)
     providers, vectors = Providers(runtime_settings), VectorStore(runtime_settings)
-    embeddings: list[list[float]] = []
     try:
-        for start in range(0, len(chunks), 16):
-            batch_path = cache / f"{digest}-{start}.json"
-            if batch_path.exists():
-                batch = json.loads(batch_path.read_text(encoding="utf-8"))
-            else:
-                values, usage = await providers.embed([c["text"] for c in chunks[start:start + 16]])
-                batch = {"vectors": values, "usage": usage}
-                temp = batch_path.with_suffix(".tmp")
-                temp.write_text(json.dumps(batch), encoding="utf-8")
-                temp.replace(batch_path)
-            embeddings.extend(batch["vectors"])
+        embeddings = await cached_embeddings(folder, [c["text"] for c in chunks], runtime_settings, providers)
         await set_stage(document_id, "indexing")
         await vectors.upsert(chunks, embeddings, kb_id, document_id)
         async with Session() as db:

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     rerank_protocol: str = "dashscope"
     mineru_base_url: str = "http://127.0.0.1:28000"
     milvus_uri: str = "http://127.0.0.1:29530"
-    milvus_collection: str = "rag_workbench_chunks_v1"
+    milvus_collection: str = "rag_workbench_chunks_v2"
     model_timeout: float = 120.0
     max_output_tokens: int = 4096
     max_upload_mb: int = 50

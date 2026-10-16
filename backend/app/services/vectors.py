@@ -3,6 +3,11 @@
 Only rag_workbench_* collections are accepted. There are intentionally no drop or
 migration methods, and an incompatible existing schema is never edited. Deletion is
 limited to one document's vectors under the mandatory tenant + knowledge base scope.
+
+Each row carries the chunk text as well as its dense vector: Milvus derives a BM25
+sparse vector from the text (jieba words, lowercased, punctuation dropped), so the
+keyword route is a server-side full-text search instead of an in-process rebuild.
+BM25 term statistics span the whole collection, not one knowledge base.
 """
 
 from __future__ import annotations
@@ -13,9 +18,13 @@ import re
 from typing import Any, Protocol
 
 from loguru import logger
-from pymilvus import DataType, MilvusClient
+from pymilvus import DataType, Function, FunctionType, MilvusClient
 
 from app.services.providers import ProviderError
+
+# Fixed at collection creation; changing it means building a new collection.
+TEXT_ANALYZER = {"tokenizer": "jieba", "filter": ["lowercase", "cnalphanumonly"]}
+TEXT_MAX_BYTES = 65535
 
 
 class VectorSettings(Protocol):
@@ -67,8 +76,14 @@ class VectorStore:
                 schema.add_field(field_name=name, datatype=DataType.VARCHAR, max_length=64)
             schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR,
                              dim=self.settings.embedding_dimensions)
+            schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=TEXT_MAX_BYTES,
+                             enable_analyzer=True, analyzer_params=TEXT_ANALYZER)
+            schema.add_field(field_name="sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
+            schema.add_function(Function(name="text_bm25", function_type=FunctionType.BM25,
+                                         input_field_names=["text"], output_field_names=["sparse"]))
             indexes = self._client.prepare_index_params()
             indexes.add_index(field_name="vector", index_type="FLAT", metric_type="COSINE")
+            indexes.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
             self._client.create_collection(collection_name=self.collection, schema=schema,
                                            index_params=indexes, consistency_level="Strong")
         info = self._client.describe_collection(collection_name=self.collection)
@@ -81,6 +96,10 @@ class VectorStore:
                 or any(fields.get(name, {}).get("type") != DataType.VARCHAR
                        for name in ("tenant_id", "knowledge_base_id", "document_id"))):
             raise _error("Existing workbench vector collection has an incompatible scope schema")
+        if (fields.get("text", {}).get("type") != DataType.VARCHAR
+                or fields.get("sparse", {}).get("type") != DataType.SPARSE_FLOAT_VECTOR):
+            raise _error("Existing workbench vector collection has no BM25 full-text fields; "
+                         "rebuild it with python -m app.reindex")
         self._client.load_collection(collection_name=self.collection)
 
     async def ensure(self) -> None:
@@ -102,6 +121,12 @@ class VectorStore:
             raise _error("Vector values must be finite and match the configured embedding dimensions")
         return [float(number) for number in vector]
 
+    def _scope(self, knowledge_base_id: int, document_ids: list[str] | None) -> str:
+        scope = f'tenant_id == "{self._tenant_id}" and knowledge_base_id == "{_identifier(knowledge_base_id)}"'
+        if document_ids is not None:
+            scope += " and document_id in [" + ", ".join(f'"{_identifier(d)}"' for d in document_ids) + "]"
+        return scope
+
     async def upsert(
         self, chunks: list[dict[str, Any]], vectors: list[list[float]],
         knowledge_base_id: int, document_id: int,
@@ -121,7 +146,10 @@ class VectorStore:
             seen.add(identifier)
             if _identifier(chunk.get("document_id")) != doc_id:
                 raise _error("Vector upsert contains a chunk from another document")
-            rows.append({"id": identifier, "vector": self._validated_vector(vector),
+            text = chunk.get("text")
+            if not isinstance(text, str) or len(text.encode("utf-8")) > TEXT_MAX_BYTES:
+                raise _error(f"Vector chunk text must be a string of at most {TEXT_MAX_BYTES} UTF-8 bytes")
+            rows.append({"id": identifier, "vector": self._validated_vector(vector), "text": text,
                          "tenant_id": self._tenant_id, "knowledge_base_id": kb_id, "document_id": doc_id})
         if not rows:
             return
@@ -143,23 +171,37 @@ class VectorStore:
         document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Strongly consistent nearest neighbors with mandatory tenant + KB filter."""
-        kb_id = _identifier(knowledge_base_id)
-        scope = f'tenant_id == "{self._tenant_id}" and knowledge_base_id == "{kb_id}"'
-        if document_ids is not None:
-            if not document_ids:
-                return []
-            scope += " and document_id in [" + ", ".join(f'"{_identifier(d)}"' for d in document_ids) + "]"
+        return await self._search(self._validated_vector(vector), "vector", "COSINE",
+                                  knowledge_base_id, limit, document_ids, "vector")
+
+    async def bm25_search(
+        self, query: str, knowledge_base_id: int, limit: int = 20,
+        document_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Server-side BM25 full-text search over chunk text, same scope rules as ``search``."""
+        if not isinstance(query, str):
+            raise _error("BM25 query must be a string")
+        if not query.strip():
+            return []
+        return await self._search(query, "sparse", "BM25", knowledge_base_id, limit, document_ids, "BM25")
+
+    async def _search(
+        self, data: list[float] | str, field: str, metric: str, knowledge_base_id: int, limit: int,
+        document_ids: list[str] | None, label: str,
+    ) -> list[dict[str, Any]]:
+        scope = self._scope(knowledge_base_id, document_ids)
+        if document_ids is not None and not document_ids:
+            return []
         if type(limit) is not int or not 1 <= limit <= 16384:
             raise _error("Vector search limit must be between 1 and 16384")
-        query_vector = self._validated_vector(vector)
         await self.ensure()
         async with self._lock:
             try:
                 assert self._client is not None
                 results = await asyncio.to_thread(
-                    self._client.search, collection_name=self.collection, data=[query_vector],
-                    anns_field="vector", limit=limit,
-                    filter=scope, output_fields=["id"], search_params={"metric_type": "COSINE", "params": {}},
+                    self._client.search, collection_name=self.collection, data=[data],
+                    anns_field=field, limit=limit,
+                    filter=scope, output_fields=["id"], search_params={"metric_type": metric, "params": {}},
                     consistency_level="Strong",
                 )
                 if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], list):
@@ -179,7 +221,7 @@ class VectorStore:
             except ProviderError:
                 raise
             except Exception:  # noqa: BLE001 - SDK boundary; never expose raw connection/credential errors.
-                raise _error("Milvus vector search failed; check the local vector service") from None
+                raise _error(f"Milvus {label} search failed; check the local vector service") from None
 
     async def delete_document(self, knowledge_base_id: int, document_id: int) -> None:
         """Remove one document's vectors; the filter always carries tenant + KB + document."""
