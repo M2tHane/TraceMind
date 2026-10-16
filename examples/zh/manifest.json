@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "title": "中文法规与中文论文 RAG 检索评测题集",
+  "created": "2026-10-15",
+  "question_language": "zh-CN",
+  "evidence_language": "zh-CN（PAP-015 证据为论文英文摘要）",
+  "review_status": "auto_checked_pending_human_review",
+  "independent_human_review_complete": false,
+  "datasets": {
+    "questions_regulations.jsonl": {
+      "knowledge_base": "中文法规库",
+      "sha256": "e9d6f43b80f52e90a0505bcbf9d96e3fb50321d16261256b638009258147e051",
+      "records": 53,
+      "answerable": 49,
+      "evidence_labels": 53,
+      "by_category": {
+        "literal": 24,
+        "paraphrase": 20,
+        "synthesis": 4,
+        "calculation": 1,
+        "unanswerable": 4
+      },
+      "literal_paraphrase_pairs": 6
+    },
+    "questions_papers.jsonl": {
+      "knowledge_base": "中文论文库",
+      "sha256": "68b9875754d0aa4126c7a8f273823975ea8e7163c34eca91a274c3a90736da0c",
+      "records": 32,
+      "answerable": 29,
+      "evidence_labels": 30,
+      "by_category": {
+        "literal": 15,
+        "paraphrase": 10,
+        "table_lookup": 2,
+        "calculation": 1,
+        "synthesis": 1,
+        "unanswerable": 3
+      },
+      "literal_paraphrase_pairs": 0
+    }
+  },
+  "categories": {
+    "literal": "题面沿用原文措辞、条款号、术语或数字",
+    "paraphrase": "口语化或换一种说法提问，刻意避开原文用词",
+    "synthesis": "答案需要两条及以上证据（可跨条款、跨文档）",
+    "calculation": "需要在证据数字上做简单计算",
+    "table_lookup": "答案来自 MinerU 解析后的表格文本",
+    "unanswerable": "资料中没有答案，不参与检索指标"
+  },
+  "annotation_protocol": [
+    "证据原文从 MinerU 解析后的分块文本中逐字摘录（不是从 PDF 文字流摘录），页码取分块页锚点",
+    "每条证据都已用评测匹配规则（app.services.metrics._matches）在对应知识库中验证可达，不可达 0 条",
+    "部分题目以 pair 字段成对出现：同一证据分别用字面问法和口语问法提问，用于比较 BM25 与向量检索",
+    "题目由 Claude 依据原文撰写，未经人工复核"
+  ],
+  "known_limitations": [
+    "出题者能看到原文，字面题的措辞可能比真实用户更贴近原文",
+    "法规库按页分块（每页约 400 字，chunk_size=600），一个分块常含多条条款",
+    "相关性只有两级，按证据原文包含度自动判定"
+  ],
+  "documents": [
+    {
+      "doc_id": "职工带薪年休假条例",
+      "file": "annual-leave.pdf",
+      "knowledge_base": "中文法规库",
+      "source_url": "https://xzfg.moj.gov.cn/front/law/detail?LawID=208",
+      "citation": "国务院令第514号，2008-01-01施行；司法部国家行政法规库 PDF",
+      "license": "行政法规，依《著作权法》第五条不适用著作权保护",
+      "sha256": "ec2f74c7694f4320684ac76a867dd278eb8ba2e5dd783cc8623a088d1da66f5c"
+    },
+    {
+      "doc_id": "劳动合同法实施条例",
+      "file": "labor-contract-regulation.pdf",
+      "knowledge_base": "中文法规库",
+      "source_url": "https://xzfg.moj.gov.cn/front/law/detail?LawID=284",
+      "citation": "国务院令第535号，2008-09-18施行；司法部国家行政法规库 PDF",
+      "license": "行政法规，依《著作权法》第五条不适用著作权保护",
+      "sha256": "f66535490d40a5522047cfc0e669a8c13f6fa04e107e82d2ce91ebc2959c0028"
+    },
+    {
+      "doc_id": "工伤保险条例",
+      "file": "work-injury-insurance.pdf",
+      "knowledge_base": "中文法规库",
+      "source_url": "https://xzfg.moj.gov.cn/front/law/detail?LawID=610",
+      "citation": "国务院令第375号公布、2010-12-20修订；司法部国家行政法规库 PDF",
+      "license": "行政法规，依《著作权法》第五条不适用著作权保护",
+      "sha256": "7ee652f71dd9c4140b1b9a0d6701f75d0ffaea805acb8f9813e71d58744b699f"
+    },
+    {
+      "doc_id": "图检索增强生成研究综述",
+      "file": "graph-rag-survey.pdf",
+      "knowledge_base": "中文论文库",
+      "source_url": "https://pdf.hanspub.org/airr2025142_162610573.pdf",
+      "citation": "周俭航、肖诗斌，人工智能与机器人研究 2025,14(2):402-413，DOI 10.12677/airr.2025.142040",
+      "license": "CC BY 4.0（PDF 第2页声明）",
+      "sha256": "b5431defef588c799ef67802785b8eebff7c1795557133f6037aff53c618fbdc"
+    },
+    {
+      "doc_id": "基于检索增强思维提示的汉语框架语义解析方法",
+      "file": "ccl2025-frame-parsing.pdf",
+      "knowledge_base": "中文论文库",
+      "source_url": "https://aclanthology.org/2025.ccl-1.15.pdf",
+      "citation": "李迎旭等，第二十四届中国计算语言学大会（CCL 2025）论文集 184-209",
+      "license": "CC BY 4.0（PDF 第2页声明）",
+      "sha256": "7e1100ee5dc2bc810de48a458a42cfa3799c9ce3808483db33e63b968d527f9c"
+    }
+  ]
+}
